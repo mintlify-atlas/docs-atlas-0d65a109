@@ -1,0 +1,168 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "jasonisnthappy",
+  "projectDescription": "A lightweight, embedded document database with ACID transactions and MVCC support",
+  "theme": "sequoia",
+  "primaryColor": "#4F46E5",
+  "lightColor": "#818CF8",
+  "darkColor": "#3730A3",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/transactions",
+              "concepts/mvcc",
+              "concepts/storage-engine"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/crud-operations",
+              "guides/querying",
+              "guides/indexes",
+              "guides/schema-validation",
+              "guides/aggregation",
+              "guides/change-streams",
+              "guides/full-text-search",
+              "guides/backup-restore",
+              "guides/performance"
+            ]
+          },
+          {
+            "group": "Language SDKs",
+            "pages": [
+              "sdks/rust",
+              "sdks/go",
+              "sdks/python",
+              "sdks/javascript"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Rust API",
+            "pages": [
+              "api/rust/database",
+              "api/rust/transaction",
+              "api/rust/collection",
+              "api/rust/query-builder",
+              "api/rust/aggregation",
+              "api/rust/schema",
+              "api/rust/watch"
+            ]
+          },
+          {
+            "group": "Go API",
+            "pages": [
+              "api/go/database",
+              "api/go/transaction",
+              "api/go/examples"
+            ]
+          },
+          {
+            "group": "Python API",
+            "pages": [
+              "api/python/database",
+              "api/python/transaction",
+              "api/python/collection",
+              "api/python/examples"
+            ]
+          },
+          {
+            "group": "JavaScript API",
+            "pages": [
+              "api/javascript/database",
+              "api/javascript/transaction",
+              "api/javascript/collection",
+              "api/javascript/types"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI & Tools",
+        "groups": [
+          {
+            "group": "Command Line",
+            "pages": [
+              "cli/overview",
+              "cli/database-commands",
+              "cli/collection-commands",
+              "cli/document-commands",
+              "cli/repl"
+            ]
+          },
+          {
+            "group": "Web UI",
+            "pages": [
+              "web-ui/overview",
+              "web-ui/rest-api"
+            ]
+          },
+          {
+            "group": "Monitoring",
+            "pages": [
+              "monitoring/metrics",
+              "monitoring/observability"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "ACID transactions with MVCC snapshot isolation",
+    "B-tree storage engine with copy-on-write",
+    "Write-ahead logging (WAL) for durability",
+    "Full-text search with TF-IDF scoring",
+    "Query language with operators and dot notation",
+    "Aggregation pipeline with group, match, sort stages",
+    "JSON Schema validation",
+    "Change streams for real-time notifications",
+    "Bulk operations for high-throughput writes",
+    "Multi-language bindings (Rust, Go, Python, JavaScript)",
+    "CLI with interactive REPL",
+    "Web UI with REST API"
+  ],
+  "publicApiSurface": [
+    "Database::open",
+    "Database::begin",
+    "Database::close",
+    "Transaction::commit",
+    "Transaction::rollback",
+    "Collection::insert",
+    "Collection::find",
+    "Collection::update",
+    "Collection::delete",
+    "Collection::query",
+    "Collection::aggregate",
+    "Collection::search",
+    "Collection::watch",
+    "Collection::insert_many",
+    "Collection::bulk_write",
+    "QueryBuilder",
+    "AggregationPipeline",
+    "Schema::new",
+    "Database::create_index",
+    "Database::backup",
+    "Database::garbage_collect",
+    "Database::metrics"
+  ]
+}
