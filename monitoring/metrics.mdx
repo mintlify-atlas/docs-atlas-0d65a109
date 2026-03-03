@@ -1,0 +1,496 @@
+---
+title: Metrics
+description: Track database performance and operations with built-in metrics
+---
+
+jasonisnthappy includes comprehensive metrics tracking for monitoring database performance, operations, and health. All metrics are collected using lock-free atomic operations with minimal overhead.
+
+## Metrics structure
+
+Metrics are organized into six categories:
+
+- **Transaction metrics** - Track transaction lifecycle and conflicts
+- **Batch commit metrics** - Monitor batch commit performance
+- **Storage metrics** - Page allocation, cache, and memory usage
+- **WAL metrics** - Write-ahead log activity and throughput
+- **Operation metrics** - Document CRUD operations
+- **Error metrics** - I/O errors and transaction conflicts
+
+## Accessing metrics
+
+Retrieve a snapshot of current metrics using the `metrics()` method:
+
+```rust
+use jasonisnthappy::Database;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db = Database::open("mydb.db")?;
+    
+    // Perform some operations
+    let mut tx = db.begin()?;
+    let mut users = tx.collection("users")?;
+    // ... insert/update/delete operations ...
+    tx.commit()?;
+    
+    // Get metrics snapshot
+    let metrics = db.metrics();
+    
+    println!("Transactions committed: {}", metrics.transactions_committed);
+    println!("Cache hit rate: {:.2}%", metrics.cache_hit_rate * 100.0);
+    println!("Documents inserted: {}", metrics.documents_inserted);
+    
+    Ok(())
+}
+```
+
+## Transaction metrics
+
+Track the lifecycle of transactions and detect conflicts.
+
+<ParamField path="transactions_begun" type="u64">
+  Total number of transactions started
+</ParamField>
+
+<ParamField path="transactions_committed" type="u64">
+  Total number of transactions successfully committed
+</ParamField>
+
+<ParamField path="transactions_aborted" type="u64">
+  Total number of transactions aborted or rolled back
+</ParamField>
+
+<ParamField path="active_transactions" type="usize">
+  Number of currently active transactions
+</ParamField>
+
+<ParamField path="total_transactions" type="u64">
+  Sum of committed + aborted transactions
+</ParamField>
+
+<ParamField path="commit_rate" type="f64">
+  Percentage of transactions committed successfully (0.0 to 1.0)
+</ParamField>
+
+<ParamField path="transaction_conflicts" type="u64">
+  Number of transaction conflicts detected (MVCC conflicts)
+</ParamField>
+
+**Example**
+
+```rust
+let metrics = db.metrics();
+
+println!("📊 TRANSACTIONS:");
+println!("   Begun:      {}", metrics.transactions_begun);
+println!("   Committed:  {}", metrics.transactions_committed);
+println!("   Aborted:    {}", metrics.transactions_aborted);
+println!("   Active:     {}", metrics.active_transactions);
+println!("   Commit Rate: {:.1}%", metrics.commit_rate * 100.0);
+println!("   Conflicts:  {}", metrics.transaction_conflicts);
+```
+
+<Info>
+A high abort rate or many conflicts may indicate contention. Consider batching operations or optimizing transaction scope.
+</Info>
+
+## Batch commit metrics
+
+Monitor batch commit performance and throughput.
+
+<ParamField path="batches_committed" type="u64">
+  Total number of batches committed
+</ParamField>
+
+<ParamField path="total_batched_txs" type="u64">
+  Total number of transactions committed in batches
+</ParamField>
+
+<ParamField path="max_batch_size" type="usize">
+  Largest batch size committed
+</ParamField>
+
+<ParamField path="avg_batch_size" type="f64">
+  Average number of transactions per batch
+</ParamField>
+
+<ParamField path="avg_batch_time_micros" type="f64">
+  Average batch commit time in microseconds
+</ParamField>
+
+**Example**
+
+```rust
+let metrics = db.metrics();
+
+if metrics.batches_committed > 0 {
+    println!("📦 BATCH COMMITS:");
+    println!("   Batches:     {}", metrics.batches_committed);
+    println!("   Total Txs:   {}", metrics.total_batched_txs);
+    println!("   Avg Size:    {:.1}", metrics.avg_batch_size);
+    println!("   Max Size:    {}", metrics.max_batch_size);
+    println!("   Avg Time:    {:.2}ms", metrics.avg_batch_time_micros / 1000.0);
+}
+```
+
+## Storage metrics
+
+Monitor page allocation, cache performance, and memory usage.
+
+<ParamField path="pages_allocated" type="u64">
+  Total number of pages allocated
+</ParamField>
+
+<ParamField path="pages_freed" type="u64">
+  Total number of pages freed
+</ParamField>
+
+<ParamField path="cache_hits" type="u64">
+  Number of successful cache lookups
+</ParamField>
+
+<ParamField path="cache_misses" type="u64">
+  Number of cache misses requiring disk reads
+</ParamField>
+
+<ParamField path="cache_total_requests" type="u64">
+  Total cache requests (hits + misses)
+</ParamField>
+
+<ParamField path="cache_hit_rate" type="f64">
+  Cache efficiency percentage (0.0 to 1.0)
+</ParamField>
+
+<ParamField path="dirty_pages" type="usize">
+  Number of modified pages not yet written to disk
+</ParamField>
+
+**Example**
+
+```rust
+let metrics = db.metrics();
+
+println!("💾 CACHE:");
+println!("   Hit Rate:    {:.2}%", metrics.cache_hit_rate * 100.0);
+println!("   Hits:        {}", metrics.cache_hits);
+println!("   Misses:      {}", metrics.cache_misses);
+println!("   Requests:    {}", metrics.cache_total_requests);
+println!("   Dirty Pages: {}", metrics.dirty_pages);
+
+println!("\n📦 STORAGE:");
+println!("   Allocated:   {}", metrics.pages_allocated);
+println!("   Freed:       {}", metrics.pages_freed);
+println!("   Net Pages:   {}", metrics.pages_allocated - metrics.pages_freed);
+```
+
+<Note>
+A low cache hit rate (< 70%) may indicate insufficient cache size. Consider increasing the cache size when opening the database.
+</Note>
+
+## WAL metrics
+
+Track write-ahead log activity and I/O throughput.
+
+<ParamField path="wal_writes" type="u64">
+  Number of writes to the WAL
+</ParamField>
+
+<ParamField path="wal_bytes_written" type="u64">
+  Total bytes written to WAL
+</ParamField>
+
+<ParamField path="checkpoints" type="u64">
+  Number of checkpoint operations completed
+</ParamField>
+
+**Example**
+
+```rust
+let metrics = db.metrics();
+
+println!("📝 WAL:");
+println!("   Writes:      {}", metrics.wal_writes);
+println!("   Bytes:       {} MB", metrics.wal_bytes_written / 1_048_576);
+println!("   Checkpoints: {}", metrics.checkpoints);
+
+if metrics.wal_writes > 0 {
+    let avg_write_size = metrics.wal_bytes_written / metrics.wal_writes;
+    println!("   Avg Write:   {} bytes", avg_write_size);
+}
+```
+
+## Operation metrics
+
+Monitor document CRUD operations.
+
+<ParamField path="documents_inserted" type="u64">
+  Total number of documents inserted
+</ParamField>
+
+<ParamField path="documents_updated" type="u64">
+  Total number of documents updated
+</ParamField>
+
+<ParamField path="documents_deleted" type="u64">
+  Total number of documents deleted
+</ParamField>
+
+<ParamField path="documents_read" type="u64">
+  Total number of documents read
+</ParamField>
+
+<ParamField path="total_document_operations" type="u64">
+  Sum of all document operations
+</ParamField>
+
+**Example**
+
+```rust
+let metrics = db.metrics();
+
+println!("📄 DOCUMENTS:");
+println!("   Inserted:    {}", metrics.documents_inserted);
+println!("   Updated:     {}", metrics.documents_updated);
+println!("   Deleted:     {}", metrics.documents_deleted);
+println!("   Read:        {}", metrics.documents_read);
+println!("   Total Ops:   {}", metrics.total_document_operations);
+
+let writes = metrics.documents_inserted + metrics.documents_updated + metrics.documents_deleted;
+if metrics.total_document_operations > 0 {
+    let read_ratio = metrics.documents_read as f64 / metrics.total_document_operations as f64;
+    println!("   Read Ratio:  {:.1}%", read_ratio * 100.0);
+}
+```
+
+## Error metrics
+
+Track errors and failures.
+
+<ParamField path="io_errors" type="u64">
+  Number of I/O errors encountered
+</ParamField>
+
+<ParamField path="transaction_conflicts" type="u64">
+  Number of MVCC transaction conflicts
+</ParamField>
+
+**Example**
+
+```rust
+let metrics = db.metrics();
+
+println!("⚠️  ERRORS:");
+println!("   I/O Errors:  {}", metrics.io_errors);
+println!("   Conflicts:   {}", metrics.transaction_conflicts);
+
+if metrics.io_errors > 0 {
+    eprintln!("WARNING: I/O errors detected - check disk health");
+}
+```
+
+<Note>
+Non-zero I/O errors may indicate disk issues, permissions problems, or filesystem errors. Investigate immediately.
+</Note>
+
+## Complete example
+
+Here's a complete example that performs operations and displays metrics:
+
+```rust examples/metrics_demo.rs
+use jasonisnthappy::Database;
+use serde_json::json;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db = Database::open("metrics_demo.db")?;
+    
+    // Insert data in batches
+    println!("Inserting 50 documents...");
+    for batch in 0..5 {
+        let mut tx = db.begin()?;
+        let mut users = tx.collection("users")?;
+        
+        for i in 1..=10 {
+            users.insert(json!({
+                "name": format!("User {}", batch * 10 + i),
+                "age": 20 + i,
+                "active": true
+            }))?;
+        }
+        tx.commit()?;
+    }
+    
+    // Read and update data
+    let mut tx = db.begin()?;
+    let mut users = tx.collection("users")?;
+    let all_docs = users.find_all()?;
+    println!("Read {} documents", all_docs.len());
+    
+    // Update first 5 documents
+    for doc in all_docs.iter().take(5) {
+        let id = doc["_id"].as_str().unwrap();
+        users.update_by_id(id, json!({"active": false}))?;
+    }
+    tx.commit()?;
+    
+    // Display metrics
+    let metrics = db.metrics();
+    
+    println!("\n=== Metrics Snapshot ===");
+    
+    println!("\n📊 TRANSACTIONS:");
+    println!("   Active:      {}", metrics.active_transactions);
+    println!("   Committed:   {}", metrics.transactions_committed);
+    println!("   Aborted:     {}", metrics.transactions_aborted);
+    println!("   Commit Rate: {:.1}%", metrics.commit_rate * 100.0);
+    
+    println!("\n💾 CACHE:");
+    println!("   Hit Rate:    {:.2}%", metrics.cache_hit_rate * 100.0);
+    println!("   Hits:        {}", metrics.cache_hits);
+    println!("   Misses:      {}", metrics.cache_misses);
+    println!("   Dirty Pages: {}", metrics.dirty_pages);
+    
+    println!("\n📦 STORAGE:");
+    println!("   Pages Alloc: {}", metrics.pages_allocated);
+    println!("   Pages Freed: {}", metrics.pages_freed);
+    println!("   WAL Writes:  {}", metrics.wal_writes);
+    println!("   WAL Bytes:   {} KB", metrics.wal_bytes_written / 1024);
+    
+    println!("\n📄 DOCUMENTS:");
+    println!("   Inserted:    {}", metrics.documents_inserted);
+    println!("   Updated:     {}", metrics.documents_updated);
+    println!("   Deleted:     {}", metrics.documents_deleted);
+    println!("   Read:        {}", metrics.documents_read);
+    
+    println!("\n⚠️  ERRORS:");
+    println!("   I/O Errors:  {}", metrics.io_errors);
+    println!("   Conflicts:   {}", metrics.transaction_conflicts);
+    
+    db.close()?;
+    Ok(())
+}
+```
+
+## Metrics implementation
+
+Metrics are tracked using lock-free atomic operations for minimal overhead:
+
+```rust src/core/metrics.rs
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
+pub struct Metrics {
+    // All fields use atomic types
+    transactions_begun: AtomicU64,
+    transactions_committed: AtomicU64,
+    transactions_aborted: AtomicU64,
+    active_transactions: AtomicUsize,
+    
+    cache_hits: AtomicU64,
+    cache_misses: AtomicU64,
+    // ... other fields
+}
+
+impl Metrics {
+    #[inline]
+    pub fn transaction_begun(&self) {
+        self.transactions_begun.fetch_add(1, Ordering::Relaxed);
+        self.active_transactions.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    #[inline]
+    pub fn cache_hit(&self) {
+        self.cache_hits.fetch_add(1, Ordering::Relaxed);
+    }
+    
+    pub fn snapshot(&self) -> MetricsSnapshot {
+        // Atomically read all metrics
+        // Compute derived values like hit rate
+    }
+}
+```
+
+<Info>
+Metrics use `Relaxed` ordering since strict consistency isn't required for monitoring. This provides maximum performance with minimal overhead.
+</Info>
+
+## Monitoring patterns
+
+### Periodic snapshots
+
+```rust
+use std::time::Duration;
+use std::thread;
+
+let db = Database::open("mydb.db")?;
+
+// Spawn monitoring thread
+let db_clone = db.clone();
+thread::spawn(move || {
+    loop {
+        thread::sleep(Duration::from_secs(60));
+        
+        let metrics = db_clone.metrics();
+        println!("[{}] Cache hit rate: {:.1}%, Active txs: {}",
+            chrono::Local::now().format("%H:%M:%S"),
+            metrics.cache_hit_rate * 100.0,
+            metrics.active_transactions
+        );
+    }
+});
+```
+
+### Alert on thresholds
+
+```rust
+let metrics = db.metrics();
+
+if metrics.cache_hit_rate < 0.7 {
+    eprintln!("WARNING: Cache hit rate is low: {:.1}%", 
+        metrics.cache_hit_rate * 100.0);
+}
+
+if metrics.io_errors > 0 {
+    eprintln!("CRITICAL: {} I/O errors detected", metrics.io_errors);
+}
+
+if metrics.active_transactions > 100 {
+    eprintln!("WARNING: High transaction count: {}", 
+        metrics.active_transactions);
+}
+```
+
+### Export to monitoring systems
+
+```rust
+use serde_json::json;
+
+let metrics = db.metrics();
+
+// Export to Prometheus, StatsD, etc.
+let prometheus_metrics = format!(
+    "db_cache_hit_rate {{}}\ndb_transactions_committed {}\ndb_documents_inserted {}",
+    metrics.cache_hit_rate,
+    metrics.transactions_committed,
+    metrics.documents_inserted
+);
+
+// Or JSON for logging
+let json_metrics = json!({
+    "timestamp": chrono::Utc::now().to_rfc3339(),
+    "cache_hit_rate": metrics.cache_hit_rate,
+    "transactions": {
+        "committed": metrics.transactions_committed,
+        "active": metrics.active_transactions
+    },
+    "documents": {
+        "inserted": metrics.documents_inserted,
+        "read": metrics.documents_read
+    }
+});
+
+println!("{}", serde_json::to_string_pretty(&json_metrics)?);
+```
+
+## Next steps
+
+- [Observability](/monitoring/observability) - Advanced monitoring and backup strategies
+- [Web UI](/web-ui/overview) - View metrics in real-time dashboard
+- [REST API](/web-ui/rest-api) - Fetch metrics programmatically

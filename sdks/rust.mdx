@@ -1,0 +1,385 @@
+---
+title: Rust SDK
+description: Using jasonisnthappy in Rust applications
+---
+
+## Installation
+
+Add jasonisnthappy to your `Cargo.toml`:
+
+```toml
+[dependencies]
+jasonisnthappy = "0.1.1"
+```
+
+For web UI support:
+
+```toml
+[dependencies]
+jasonisnthappy = { version = "0.1.1", features = ["web-ui"] }
+```
+
+## Quick start
+
+<Steps>
+  <Step title="Import the database">
+    ```rust
+    use jasonisnthappy::Database;
+    use serde_json::json;
+    use std::sync::Arc;
+    ```
+  </Step>
+  
+  <Step title="Open a database">
+    ```rust
+    let db = Arc::new(Database::open("my_database.db")?);
+    ```
+  </Step>
+  
+  <Step title="Get a collection and insert documents">
+    ```rust
+    let users = db.collection("users");
+    
+    let alice = json!({
+        "name": "Alice",
+        "age": 30,
+        "city": "New York"
+    });
+    
+    let id = users.insert(alice)?;
+    println!("Inserted document with ID: {}", id);
+    ```
+  </Step>
+  
+  <Step title="Query documents">
+    ```rust
+    // Find by ID
+    let doc = users.find_by_id(&id)?;
+    println!("Found: {}", serde_json::to_string_pretty(&doc)?);
+    
+    // Find all
+    let all_users = users.find_all()?;
+    for user in &all_users {
+        println!("User: {}", user["name"]);
+    }
+    ```
+  </Step>
+</Steps>
+
+## Complete example
+
+Here's a full working example demonstrating CRUD operations:
+
+```rust
+use jasonisnthappy::Database;
+use serde_json::json;
+use std::sync::Arc;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== Collection CRUD Example ===\n");
+
+    let db = Arc::new(Database::open("crud_example.db")?);
+    let users = db.collection("users");
+
+    println!("1. Inserting documents...");
+    let alice = json!({"name": "Alice", "age": 30, "city": "New York"});
+    let bob = json!({"name": "Bob", "age": 25, "city": "San Francisco"});
+    let charlie = json!({"name": "Charlie", "age": 35, "city": "Seattle"});
+
+    let id1 = users.insert(alice)?;
+    let id2 = users.insert(bob)?;
+    let id3 = users.insert(charlie)?;
+
+    println!("   Inserted Alice: {}", id1);
+    println!("   Inserted Bob: {}", id2);
+    println!("   Inserted Charlie: {}", id3);
+
+    println!("\n2. Counting documents...");
+    let count = users.count()?;
+    println!("   Total documents: {}", count);
+
+    println!("\n3. Finding document by ID...");
+    let found = users.find_by_id(&id1)?;
+    println!("   Found: {}", serde_json::to_string_pretty(&found)?);
+
+    println!("\n4. Finding all documents...");
+    let all_users = users.find_all()?;
+    for user in &all_users {
+        println!("   - {}", user["name"]);
+    }
+
+    println!("\n5. Updating Alice's age...");
+    users.update_by_id(&id1, json!({"age": 31}))?;
+    let updated = users.find_by_id(&id1)?;
+    println!("   Updated age: {}", updated["age"]);
+
+    println!("\n6. Deleting Bob...");
+    users.delete_by_id(&id2)?;
+    let count_after_delete = users.count()?;
+    println!("   Documents after delete: {}", count_after_delete);
+
+    println!("\n7. Remaining documents:");
+    let remaining = users.find_all()?;
+    for user in &remaining {
+        println!("   - {} (age {})", user["name"], user["age"]);
+    }
+
+    db.close()?;
+    println!("\n=== Example Complete ===");
+
+    Ok(())
+}
+```
+
+## API reference
+
+### Database
+
+#### Opening databases
+
+```rust
+pub fn open(path: &str) -> Result<Database>
+pub fn open_with_options(path: &str, options: DatabaseOptions) -> Result<Database>
+```
+
+<Note>
+  The database uses write-ahead logging (WAL) for ACID transactions and MVCC support.
+</Note>
+
+#### Collection access
+
+```rust
+pub fn collection<T: Document>(&self, name: &str) -> Collection<T>
+pub fn get_collection<T: Document>(&self, name: &str) -> Collection<T>
+```
+
+#### Transaction operations
+
+```rust
+pub fn begin_transaction(&self) -> Result<Transaction>
+```
+
+<CodeGroup>
+```rust Manual transaction
+let mut tx = db.begin_transaction()?;
+tx.insert("users", &doc)?;
+tx.commit()?;
+```
+
+```rust Auto-commit with collections
+let users = db.collection("users");
+users.insert(doc)?; // Auto-commits
+```
+</CodeGroup>
+
+### Collection
+
+#### Basic CRUD
+
+```rust
+// Insert a document
+pub fn insert(&self, doc: impl Serialize) -> Result<String>
+
+// Find by ID
+pub fn find_by_id(&self, id: &str) -> Result<Value>
+
+// Update by ID
+pub fn update_by_id(&self, id: &str, updates: impl Serialize) -> Result<()>
+
+// Delete by ID
+pub fn delete_by_id(&self, id: &str) -> Result<()>
+
+// Find all documents
+pub fn find_all(&self) -> Result<Vec<Value>>
+
+// Count documents
+pub fn count(&self) -> Result<u64>
+```
+
+#### Querying
+
+```rust
+// Find documents matching a filter
+pub fn find(&self, filter: &str) -> Result<Vec<Value>>
+
+// Find one document
+pub fn find_one(&self, filter: &str) -> Result<Option<Value>>
+
+// Update multiple documents
+pub fn update(&self, filter: &str, updates: impl Serialize) -> Result<u64>
+
+// Delete multiple documents
+pub fn delete(&self, filter: &str) -> Result<u64>
+```
+
+<Tabs>
+  <Tab title="Simple filter">
+    ```rust
+    let adults = users.find("age >= 18")?;
+    ```
+  </Tab>
+  
+  <Tab title="Complex filter">
+    ```rust
+    let results = users.find("age > 25 AND city == 'New York'")?;
+    ```
+  </Tab>
+  
+  <Tab title="Update with filter">
+    ```rust
+    let count = users.update("city == 'NYC'", json!({
+        "city": "New York"
+    }))?;
+    println!("Updated {} documents", count);
+    ```
+  </Tab>
+</Tabs>
+
+#### Bulk operations
+
+```rust
+// Insert multiple documents
+pub fn insert_many(&self, docs: Vec<impl Serialize>) -> Result<Vec<String>>
+
+// Upsert by ID
+pub fn upsert_by_id(&self, id: &str, doc: impl Serialize) -> Result<UpsertResult>
+
+// Bulk write operations
+pub fn bulk_write(&self, operations: Vec<BulkOperation>, ordered: bool) -> Result<BulkWriteResult>
+```
+
+### Transaction
+
+For manual transaction control:
+
+```rust
+pub struct Transaction {
+    // ...
+}
+
+impl Transaction {
+    pub fn insert(&mut self, collection: &str, doc: impl Serialize) -> Result<String>
+    pub fn find_by_id(&self, collection: &str, id: &str) -> Result<Option<Value>>
+    pub fn update_by_id(&mut self, collection: &str, id: &str, updates: impl Serialize) -> Result<()>
+    pub fn delete_by_id(&mut self, collection: &str, id: &str) -> Result<()>
+    pub fn find_all(&self, collection: &str) -> Result<Vec<Value>>
+    pub fn count(&self, collection: &str) -> Result<u64>
+    
+    pub fn commit(self) -> Result<()>
+    pub fn rollback(self)
+    pub fn is_active(&self) -> bool
+}
+```
+
+<Warning>
+  Transactions must be explicitly committed or rolled back. Dropping a transaction without committing will automatically roll it back.
+</Warning>
+
+## Advanced features
+
+### Indexing
+
+```rust
+// Create a single-field index
+db.create_index("users", "idx_email", "email", true)?; // unique
+
+// Create a compound index
+db.create_compound_index("users", "idx_name_age", vec!["name", "age"], false)?;
+
+// Create a text search index
+db.create_text_index("posts", "idx_content", "content")?;
+
+// List indexes
+let indexes = db.list_indexes("users")?;
+```
+
+### Schema validation
+
+```rust
+let schema = json!({
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "age": {"type": "number"},
+        "email": {"type": "string"}
+    },
+    "required": ["name", "email"]
+});
+
+db.set_schema("users", schema)?;
+```
+
+### Change streams
+
+```rust
+use jasonisnthappy::{ChangeOperation, WatchCallback};
+
+let handle = users.watch(Some("age > 18"), |operation, doc_id, document| {
+    match operation {
+        ChangeOperation::Insert => println!("Inserted: {}", doc_id),
+        ChangeOperation::Update => println!("Updated: {}", doc_id),
+        ChangeOperation::Delete => println!("Deleted: {}", doc_id),
+    }
+});
+
+// Later, stop watching
+handle.stop();
+```
+
+### Aggregation pipeline
+
+```rust
+let pipeline = vec![
+    json!({"match": "age >= 18"}),
+    json!({"group_by": "city"}),
+    json!({"count": "population"}),
+    json!({"sort": {"field": "population", "asc": false}}),
+];
+
+let results = users.aggregate(&pipeline)?;
+```
+
+## Error handling
+
+```rust
+use jasonisnthappy::{Error, Result};
+
+match users.find_by_id(&id) {
+    Ok(doc) => println!("Found: {:?}", doc),
+    Err(Error::NotFound) => println!("Document not found"),
+    Err(Error::IoError(e)) => eprintln!("IO error: {}", e),
+    Err(e) => eprintln!("Error: {}", e),
+}
+```
+
+## Platform support
+
+- Linux (x86_64, ARM64)
+- macOS (Intel, Apple Silicon)
+- Windows (x86_64)
+
+## Type safety
+
+For type-safe document handling, define your own structs:
+
+```rust
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize)]
+struct User {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    _id: Option<String>,
+    name: String,
+    age: u32,
+    email: String,
+}
+
+let user = User {
+    _id: None,
+    name: "Alice".to_string(),
+    age: 30,
+    email: "alice@example.com".to_string(),
+};
+
+let id = users.insert(&user)?;
+```

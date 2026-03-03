@@ -1,0 +1,437 @@
+---
+title: Interactive REPL
+description: Explore jasonisnthappy databases with the interactive shell
+---
+
+The jasonisnthappy REPL (Read-Eval-Print Loop) provides an interactive shell for exploring and managing databases. It's similar to the MongoDB shell or Redis CLI.
+
+## Starting the REPL
+
+There are two ways to enter interactive mode:
+
+<CodeGroup>
+```bash Using --interactive flag
+jasonisnthappy mydb.db --interactive
+```
+
+```bash Implicit (database path only)
+jasonisnthappy mydb.db
+```
+
+```bash Short form
+jasonisnthappy mydb.db -i
+```
+</CodeGroup>
+
+### With web UI
+
+Launch the REPL with the built-in web interface:
+
+```bash
+jasonisnthappy mydb.db --interactive --web-ui
+```
+
+## REPL prompt
+
+The prompt changes based on context:
+
+```bash
+db>          # No collection selected
+users>       # Collection 'users' is active
+```
+
+## Available commands
+
+### Database commands
+
+<CodeGroup>
+```bash Show database info
+db> info
+```
+
+```bash List all collections
+db> collections
+```
+
+```bash Show metrics
+db> metrics
+```
+
+```bash Create backup
+db> backup mydb.backup.db
+```
+</CodeGroup>
+
+### Collection commands
+
+<CodeGroup>
+```bash Select a collection
+db> use users
+```
+
+```bash Create new collection
+db> create products
+```
+
+```bash Drop current collection
+users> drop
+```
+</CodeGroup>
+
+<Note>
+After using `use <collection>`, the prompt changes to show the active collection name.
+</Note>
+
+### Document commands
+
+All document commands operate on the currently selected collection:
+
+<CodeGroup>
+```bash Insert document
+users> insert {"name":"Alice","age":30}
+```
+
+```bash Find all documents
+users> find
+```
+
+```bash Find with query
+users> find {"age":{"$gte":25}}
+```
+
+```bash Count documents
+users> count
+users> count {"status":"active"}
+```
+
+```bash Update documents
+users> update {"name":"Alice"} {"$set":{"age":31}}
+```
+
+```bash Delete documents
+users> delete {"status":"inactive"}
+```
+</CodeGroup>
+
+### Index commands
+
+<CodeGroup>
+```bash List indexes
+users> indexes
+```
+
+```bash Create index
+users> create-index email
+```
+
+```bash Create unique index
+users> create-index email --unique
+```
+</CodeGroup>
+
+### Import/export
+
+<CodeGroup>
+```bash Export collection
+users> export users_backup.json
+```
+
+```bash Import into collection
+users> import users_data.json
+```
+</CodeGroup>
+
+### Help and exit
+
+<CodeGroup>
+```bash Show help
+db> help
+```
+
+```bash Exit REPL
+db> exit
+db> quit
+```
+</CodeGroup>
+
+<Tip>
+Press `Ctrl+C` to cancel the current line. Press `Ctrl+D` or type `exit` to quit.
+</Tip>
+
+## Example session
+
+Here's a typical REPL workflow:
+
+<Tabs>
+  <Tab title="Basic workflow">
+    ```bash
+    $ jasonisnthappy mydb.db
+    jasonisnthappy interactive shell
+    Database: mydb.db
+    Type 'help' for available commands, 'exit' to quit
+    
+    db> collections
+    Collections (2):
+      • users (45 documents)
+      • orders (123 documents)
+    
+    db> use users
+    ✓ Now using collection 'users'
+    
+    users> find {"age":{"$gte":30}}
+    Found 12 documents:
+    
+    Document ID: 1
+    {
+      "name": "Alice",
+      "age": 30,
+      "email": "alice@example.com"
+    }
+    
+    Document ID: 5
+    {
+      "name": "Bob",
+      "age": 35,
+      "email": "bob@example.com"
+    }
+    
+    users> count {"age":{"$gte":30}}
+    Count: 12 documents
+    
+    users> exit
+    ```
+  </Tab>
+  
+  <Tab title="Creating data">
+    ```bash
+    $ jasonisnthappy newdb.db -i
+    jasonisnthappy interactive shell
+    Database: newdb.db
+    
+    db> create users
+    ✓ Collection 'users' created successfully
+    
+    db> use users
+    ✓ Now using collection 'users'
+    
+    users> insert {"name":"Alice","email":"alice@example.com","age":30}
+    ✓ Document inserted
+      Collection: users
+      ID: 1
+    
+    users> insert {"name":"Bob","email":"bob@example.com","age":25}
+    ✓ Document inserted
+      Collection: users
+      ID: 2
+    
+    users> create-index email --unique
+    ✓ Index created on field 'email'
+      Collection: users
+      Unique: true
+      Documents indexed: 2
+    
+    users> find
+    Found 2 documents:
+    
+    Document ID: 1
+    {
+      "name": "Alice",
+      "email": "alice@example.com",
+      "age": 30
+    }
+    
+    Document ID: 2
+    {
+      "name": "Bob",
+      "email": "bob@example.com",
+      "age": 25
+    }
+    ```
+  </Tab>
+  
+  <Tab title="Updating data">
+    ```bash
+    db> use users
+    ✓ Now using collection 'users'
+    
+    users> find {"name":"Alice"}
+    Found 1 document:
+    
+    Document ID: 1
+    {
+      "name": "Alice",
+      "age": 30,
+      "status": "active"
+    }
+    
+    users> update {"name":"Alice"} {"$set":{"age":31,"city":"Boston"}}
+    ✓ Documents updated
+      Collection: users
+      Matched: 1
+      Modified: 1
+    
+    users> find {"name":"Alice"}
+    Found 1 document:
+    
+    Document ID: 1
+    {
+      "name": "Alice",
+      "age": 31,
+      "status": "active",
+      "city": "Boston"
+    }
+    
+    users> delete {"status":"inactive"}
+    ✓ Documents deleted
+      Collection: users
+      Deleted: 3
+    ```
+  </Tab>
+</Tabs>
+
+## REPL features
+
+### Command history
+
+The REPL maintains a command history that persists between sessions:
+
+- Press `↑` (up arrow) to navigate to previous commands
+- Press `↓` (down arrow) to navigate to next commands
+- Type and press `↑` to search history for matching commands
+
+### Line editing
+
+Full readline support is available:
+
+- `Ctrl+A` - Move to beginning of line
+- `Ctrl+E` - Move to end of line
+- `Ctrl+K` - Delete from cursor to end of line
+- `Ctrl+U` - Delete from cursor to beginning of line
+- `Ctrl+W` - Delete word before cursor
+
+### Auto-completion
+
+Command names are automatically completed (future feature).
+
+## Output formatting
+
+Set the default output format when starting the REPL:
+
+<CodeGroup>
+```bash Pretty format (default)
+jasonisnthappy mydb.db -i --format pretty
+```
+
+```bash JSON format
+jasonisnthappy mydb.db -i --format json
+```
+
+```bash Table format
+jasonisnthappy mydb.db -i --format table
+```
+</CodeGroup>
+
+<Note>
+The format applies to all REPL commands. Use `--format json` for scriptable output.
+</Note>
+
+## Working with JSON
+
+### Multi-line JSON
+
+The REPL automatically detects incomplete JSON and allows multi-line input:
+
+```bash
+users> insert {
+...   "name": "Alice",
+...   "profile": {
+...     "age": 30,
+...     "city": "Boston"
+...   }
+... }
+✓ Document inserted
+```
+
+### Complex queries
+
+Complex queries can span multiple lines:
+
+```bash
+users> find {
+...   "$or": [
+...     {"age": {"$lt": 18}},
+...     {"age": {"$gte": 65}}
+...   ],
+...   "status": "active"
+... }
+```
+
+## Tips and tricks
+
+<Tip>
+**Quick database inspection**: Run `jasonisnthappy mydb.db` without `-i` to see database info and exit immediately.
+</Tip>
+
+<Tip>
+**Test queries safely**: Use `find` to preview documents before running `update` or `delete` commands.
+</Tip>
+
+<Tip>
+**Export for backup**: Regularly export important collections with `export <file>` for point-in-time backups.
+</Tip>
+
+<Tip>
+**Check before dropping**: Run `count` or `find` before `drop` to verify you're deleting the right collection.
+</Tip>
+
+## Error handling
+
+The REPL provides friendly error messages:
+
+```bash
+users> insert {invalid json}
+✗ Error: Invalid JSON: expected value at line 1 column 2
+
+db> use
+✗ Usage: use <collection>
+
+users> update {"name":"Alice"}
+✗ Usage: update {query} {update}
+```
+
+## Comparison with CLI commands
+
+REPL commands are simpler than full CLI commands:
+
+<Tabs>
+  <Tab title="REPL">
+    ```bash
+    db> use users
+    users> find {"age":{"$gte":25}}
+    users> insert {"name":"Alice"}
+    ```
+  </Tab>
+  
+  <Tab title="CLI">
+    ```bash
+    jasonisnthappy mydb.db doc find users '{"age":{"$gte":25}}'
+    jasonisnthappy mydb.db doc insert users '{"name":"Alice"}'
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+The REPL is ideal for exploration and development. Use CLI commands for automation and scripting.
+</Note>
+
+## Related commands
+
+<CardGroup cols={2}>
+  <Card title="Document commands" icon="file" href="/cli/document-commands">
+    Full CLI syntax for documents
+  </Card>
+  
+  <Card title="Database commands" icon="database" href="/cli/database-commands">
+    Full CLI syntax for databases
+  </Card>
+</CardGroup>

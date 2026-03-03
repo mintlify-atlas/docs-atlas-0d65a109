@@ -1,0 +1,395 @@
+---
+title: Querying
+description: Master jasonisnthappy's query language for filtering and searching documents
+---
+
+Jasonisnthappy includes a powerful query language that supports comparison operators, logical operations, and nested field access.
+
+## Query basics
+
+### Simple comparisons
+
+Filter documents using comparison operators.
+
+```rust
+let users = db.collection("users");
+
+// Numeric comparisons
+let results = users.find("age > 25")?;
+let results = users.find("age >= 30")?;
+let results = users.find("age < 40")?;
+let results = users.find("age <= 35")?;
+
+// String equality
+let results = users.find("name is \"Alice\"")?;
+
+// Inequality
+let results = users.find("status is not \"inactive\"")?;
+```
+
+<Note>
+Strings must be enclosed in double quotes (`"`) within the query string.
+</Note>
+
+### Logical operators
+
+Combine multiple conditions with `and` and `or`.
+
+```rust
+// AND: all conditions must be true
+let results = users.find("age > 25 and city is \"NYC\"")?;
+
+// OR: at least one condition must be true  
+let results = users.find("city is \"NYC\" or city is \"LA\"")?;
+
+// Complex combinations
+let results = users.find(
+    "(age > 25 and city is \"NYC\") or status is \"admin\""
+)?;
+```
+
+<Tip>
+Use parentheses `()` to control operator precedence in complex queries.
+</Tip>
+
+### Membership tests
+
+Check if a value is in a set of options.
+
+```rust
+// Check if field value is in list
+let results = users.find("status in [\"active\", \"premium\", \"trial\"]")?;
+
+// Check if value is NOT in list
+let results = users.find("role not in [\"banned\", \"suspended\"]")?;
+```
+
+## Nested field access
+
+Access fields in nested objects using dot notation.
+
+```rust
+use serde_json::json;
+
+// Insert document with nested structure
+users.insert(json!({
+    "name": "Alice",
+    "address": {
+        "city": "NYC",
+        "zip": "10001"
+    },
+    "profile": {
+        "preferences": {
+            "theme": "dark"
+        }
+    }
+}))?;
+
+// Query nested fields
+let results = users.find("address.city is \"NYC\"")?;
+let results = users.find("profile.preferences.theme is \"dark\"")?;
+```
+
+## Array operations
+
+Query documents with array fields.
+
+```rust
+// Insert document with arrays
+users.insert(json!({
+    "name": "Bob",
+    "tags": ["developer", "rust", "database"],
+    "scores": [85, 90, 95]
+}))?;
+
+// Check if array contains value
+let results = users.find("tags in [\"rust\"]")?;
+```
+
+## Query builder API
+
+For complex queries, use the fluent QueryBuilder API.
+
+### Basic filtering
+
+```rust
+use jasonisnthappy::SortOrder;
+
+let results = users.query()
+    .filter("age > 25")
+    .execute()?;
+```
+
+### Sorting results
+
+```rust
+// Sort ascending
+let results = users.query()
+    .sort_by("age", SortOrder::Asc)
+    .execute()?;
+
+// Sort descending  
+let results = users.query()
+    .sort_by("created_at", SortOrder::Desc)
+    .execute()?;
+
+// Multiple sort fields
+let results = users.query()
+    .sort_by("city", SortOrder::Asc)
+    .sort_by("age", SortOrder::Desc)
+    .execute()?;
+```
+
+### Pagination
+
+Implement pagination with `skip` and `limit`.
+
+<Steps>
+
+### Calculate page parameters
+
+```rust
+let page_size = 10;
+let page_number = 2; // 0-indexed
+let skip = page_number * page_size;
+```
+
+### Execute paginated query
+
+```rust
+let results = users.query()
+    .sort_by("created_at", SortOrder::Desc)
+    .skip(skip)
+    .limit(page_size)
+    .execute()?;
+```
+
+### Get total count
+
+```rust
+let total = users.query()
+    .filter("status is \"active\"")
+    .count()?;
+
+let total_pages = (total + page_size - 1) / page_size;
+```
+
+</Steps>
+
+### Field projection
+
+Select specific fields to return or exclude.
+
+<Tabs>
+  <Tab title="Include fields">
+    ```rust
+    // Only return name and email (plus _id)
+    let results = users.query()
+        .project(&["name", "email"])
+        .execute()?;
+    
+    for user in results {
+        // user has _id, name, and email only
+        println!("{}: {}", user["name"], user["email"]);
+    }
+    ```
+  </Tab>
+  <Tab title="Exclude fields">
+    ```rust
+    // Return all fields except password
+    let results = users.query()
+        .exclude(&["password", "secret_key"])
+        .execute()?;
+    
+    for user in results {
+        // user has all fields except password and secret_key
+        println!("User: {}", serde_json::to_string_pretty(&user)?);
+    }
+    ```
+  </Tab>
+  <Tab title="Nested fields">
+    ```rust
+    // Project nested fields
+    let results = users.query()
+        .project(&["name", "address.city", "profile.email"])
+        .execute()?;
+    ```
+  </Tab>
+</Tabs>
+
+### Get first result
+
+Retrieve only the first matching document.
+
+```rust
+let user = users.query()
+    .filter("age > 30")
+    .sort_by("age", SortOrder::Asc)
+    .first()?;
+
+if let Some(u) = user {
+    println!("Youngest user over 30: {}", u["name"]);
+}
+```
+
+### Count without fetching
+
+Count results without loading all documents into memory.
+
+```rust
+let count = users.query()
+    .filter("city is \"NYC\"")
+    .count()?;
+
+println!("Users in NYC: {}", count);
+```
+
+## Complete query example
+
+Combine all features for complex queries.
+
+```rust
+use jasonisnthappy::{Database, SortOrder};
+use serde_json::json;
+
+let db = Database::open("my.db")?;
+let users = db.collection("users");
+
+// Complex multi-stage query
+let results = users.query()
+    // Filter: active premium users in NYC or LA
+    .filter("status is \"premium\" and (city is \"NYC\" or city is \"LA\")")
+    // Sort by join date (newest first)
+    .sort_by("joined_at", SortOrder::Desc)
+    // Paginate: page 2, 20 items per page
+    .skip(20)
+    .limit(20)
+    // Only return name, email, and city
+    .project(&["name", "email", "city"])
+    .execute()?;
+
+for user in results {
+    println!("{} - {} ({})", 
+        user["name"], 
+        user["email"], 
+        user["city"]
+    );
+}
+```
+
+## Query operators reference
+
+### Comparison operators
+
+| Operator | Description | Example |
+|----------|-------------|----------|
+| `>` | Greater than | `age > 25` |
+| `>=` | Greater than or equal | `age >= 30` |
+| `<` | Less than | `age < 40` |
+| `<=` | Less than or equal | `age <= 35` |
+| `is` | Equality | `name is "Alice"` |
+| `is not` | Inequality | `status is not "banned"` |
+| `in` | Membership | `role in ["admin", "mod"]` |
+| `not in` | Non-membership | `status not in ["banned"]` |
+
+### Logical operators
+
+| Operator | Description | Example |
+|----------|-------------|----------|
+| `and` | Logical AND | `age > 25 and city is "NYC"` |
+| `or` | Logical OR | `role is "admin" or role is "mod"` |
+| `()` | Grouping | `(age > 25 and city is "NYC") or status is "vip"` |
+
+## Performance optimization
+
+<Tip>
+**Create indexes for frequently queried fields:**
+
+```rust
+db.create_index("users", "age_idx", "age", false)?;
+db.create_index("users", "email_idx", "email", true)?; // unique
+```
+
+See the [Indexes guide](/guides/indexes) for details.
+</Tip>
+
+<Tip>
+**Use `find_one` when you only need the first result:**
+
+```rust
+// Faster - stops after finding first match
+let user = users.find_one("email is \"alice@example.com\"")?;
+
+// Slower - scans entire collection
+let results = users.find("email is \"alice@example.com\"")?;
+let user = results.first();
+```
+</Tip>
+
+<Tip>
+**Project only needed fields:**
+
+```rust
+// Faster - less data transferred
+let results = users.query()
+    .filter("age > 25")
+    .project(&["name", "email"])
+    .execute()?;
+
+// Slower - returns all fields
+let results = users.find("age > 25")?;
+```
+</Tip>
+
+## Common patterns
+
+### Search by multiple IDs
+
+```rust
+let ids = vec!["user_1", "user_2", "user_3"];
+let query = format!("_id in [\"{}\"]", ids.join("\", \""));
+let results = users.find(&query)?;
+```
+
+### Range queries
+
+```rust
+// Age between 25 and 35
+let results = users.find("age >= 25 and age <= 35")?;
+
+// Created in the last 7 days (assuming timestamp field)
+let week_ago = get_timestamp_7_days_ago();
+let results = users.find(&format!("created_at > {}", week_ago))?;
+```
+
+### Pattern matching with indexes
+
+For prefix matching, create an index and query ranges:
+
+```rust
+db.create_index("users", "email_idx", "email", false)?;
+
+// Find emails starting with "alice"
+let results = users.find(
+    "email >= \"alice\" and email < \"alicf\""
+)?;
+```
+
+For full-text search, use text indexes (see [Full-text search guide](/guides/full-text-search)).
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Indexes" icon="bolt" href="/guides/indexes">
+    Speed up queries with indexes
+  </Card>
+  <Card title="Aggregation" icon="chart-bar" href="/guides/aggregation">
+    Analyze data with pipelines
+  </Card>
+  <Card title="Full-text search" icon="magnifying-glass" href="/guides/full-text-search">
+    Search text with TF-IDF ranking
+  </Card>
+  <Card title="Performance" icon="gauge-high" href="/guides/performance">
+    Optimize query performance
+  </Card>
+</CardGroup>

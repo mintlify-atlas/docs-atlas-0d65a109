@@ -1,0 +1,724 @@
+---
+title: Database
+description: Core database operations for jasonisnthappy Go bindings
+---
+
+The `Database` type represents a jasonisnthappy database connection.
+
+## Opening a database
+
+### Open
+
+Opens a database at the specified path with default options.
+
+```go
+func Open(path string) (*Database, error)
+```
+
+<ParamField path="path" type="string" required>
+  Path to the database file
+</ParamField>
+
+<ResponseField name="*Database" type="*Database">
+  Database instance
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if the database could not be opened
+</ResponseField>
+
+**Example:**
+
+```go
+db, err := jasonisnthappy.Open("./my_database.db")
+if err != nil {
+    log.Fatal(err)
+}
+defer db.Close()
+```
+
+### OpenWithOptions
+
+Opens a database with custom options.
+
+```go
+func OpenWithOptions(path string, opts DatabaseOptions) (*Database, error)
+```
+
+<ParamField path="path" type="string" required>
+  Path to the database file
+</ParamField>
+
+<ParamField path="opts" type="DatabaseOptions" required>
+  Custom database configuration options
+</ParamField>
+
+<ResponseField name="*Database" type="*Database">
+  Database instance
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if the database could not be opened
+</ResponseField>
+
+**Example:**
+
+```go
+opts := jasonisnthappy.DefaultDatabaseOptions()
+opts.ReadOnly = true
+opts.CacheSize = 2000
+
+db, err := jasonisnthappy.OpenWithOptions("./my_database.db", opts)
+if err != nil {
+    log.Fatal(err)
+}
+defer db.Close()
+```
+
+### DefaultDatabaseOptions
+
+Returns the default database options.
+
+```go
+func DefaultDatabaseOptions() DatabaseOptions
+```
+
+<ResponseField name="DatabaseOptions" type="DatabaseOptions">
+  Default database configuration
+</ResponseField>
+
+## Database management
+
+### Close
+
+Closes the database and frees associated resources.
+
+```go
+func (d *Database) Close()
+```
+
+**Example:**
+
+```go
+db.Close()
+```
+
+### BeginTransaction
+
+Starts a new transaction.
+
+```go
+func (d *Database) BeginTransaction() (*Transaction, error)
+```
+
+<ResponseField name="*Transaction" type="*Transaction">
+  Transaction instance
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if the transaction could not be started
+</ResponseField>
+
+**Example:**
+
+```go
+tx, err := db.BeginTransaction()
+if err != nil {
+    log.Fatal(err)
+}
+defer tx.Rollback()
+
+// ... perform operations ...
+
+err = tx.Commit()
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### RunTransaction
+
+Runs a transaction with automatic retries on conflict.
+
+```go
+func (d *Database) RunTransaction(fn func(*Transaction) error) error
+```
+
+<ParamField path="fn" type="func(*Transaction) error" required>
+  Function containing transaction operations
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if the transaction failed after retries
+</ResponseField>
+
+**Example:**
+
+```go
+err := db.RunTransaction(func(tx *jasonisnthappy.Transaction) error {
+    doc := map[string]interface{}{"name": "Alice", "age": 30}
+    _, err := tx.Insert("users", doc)
+    return err
+})
+```
+
+## Configuration
+
+### SetTransactionConfig
+
+Sets the transaction retry configuration.
+
+```go
+func (d *Database) SetTransactionConfig(config TransactionConfig) error
+```
+
+<ParamField path="config" type="TransactionConfig" required>
+  Transaction configuration with retry settings
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if the configuration could not be set
+</ResponseField>
+
+**Example:**
+
+```go
+config := jasonisnthappy.TransactionConfig{
+    MaxRetries: 5,
+    RetryBackoffBaseMs: 10,
+    MaxRetryBackoffMs: 1000,
+}
+err := db.SetTransactionConfig(config)
+```
+
+### GetTransactionConfig
+
+Gets the current transaction configuration.
+
+```go
+func (d *Database) GetTransactionConfig() (*TransactionConfig, error)
+```
+
+<ResponseField name="*TransactionConfig" type="*TransactionConfig">
+  Current transaction configuration
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if the configuration could not be retrieved
+</ResponseField>
+
+### SetAutoCheckpointThreshold
+
+Sets the auto-checkpoint threshold in WAL frames.
+
+```go
+func (d *Database) SetAutoCheckpointThreshold(threshold uint64) error
+```
+
+<ParamField path="threshold" type="uint64" required>
+  Number of WAL frames before automatic checkpoint
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if the threshold could not be set
+</ResponseField>
+
+## Database information
+
+### GetPath
+
+Returns the database file path.
+
+```go
+func (d *Database) GetPath() (string, error)
+```
+
+<ResponseField name="string" type="string">
+  Database file path
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if the path could not be retrieved
+</ResponseField>
+
+### IsReadOnly
+
+Returns whether the database is read-only.
+
+```go
+func (d *Database) IsReadOnly() (bool, error)
+```
+
+<ResponseField name="bool" type="bool">
+  True if the database is read-only
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if the status could not be checked
+</ResponseField>
+
+### ListCollections
+
+Returns a list of all collection names.
+
+```go
+func (d *Database) ListCollections() ([]string, error)
+```
+
+<ResponseField name="[]string" type="[]string">
+  List of collection names
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if collections could not be listed
+</ResponseField>
+
+### CollectionStats
+
+Returns statistics for a collection.
+
+```go
+func (d *Database) CollectionStats(collectionName string) (map[string]interface{}, error)
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="map[string]interface{}" type="map[string]interface{}">
+  Collection statistics as a map
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if stats could not be retrieved
+</ResponseField>
+
+### DatabaseInfo
+
+Returns comprehensive database information.
+
+```go
+func (d *Database) DatabaseInfo() (map[string]interface{}, error)
+```
+
+<ResponseField name="map[string]interface{}" type="map[string]interface{}">
+  Database information including path, size, collections, etc.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if info could not be retrieved
+</ResponseField>
+
+### MaxBulkOperations
+
+Returns the maximum number of bulk operations allowed.
+
+```go
+func (d *Database) MaxBulkOperations() (uint, error)
+```
+
+<ResponseField name="uint" type="uint">
+  Maximum bulk operations limit
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if limit could not be retrieved
+</ResponseField>
+
+### MaxDocumentSize
+
+Returns the maximum document size in bytes.
+
+```go
+func (d *Database) MaxDocumentSize() (uint, error)
+```
+
+<ResponseField name="uint" type="uint">
+  Maximum document size in bytes
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if size could not be retrieved
+</ResponseField>
+
+### MaxRequestBodySize
+
+Returns the maximum HTTP request body size in bytes.
+
+```go
+func (d *Database) MaxRequestBodySize() (uint, error)
+```
+
+<ResponseField name="uint" type="uint">
+  Maximum request body size in bytes
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if size could not be retrieved
+</ResponseField>
+
+## Index management
+
+### CreateIndex
+
+Creates a single-field index.
+
+```go
+func (d *Database) CreateIndex(collectionName, indexName, field string, unique bool) error
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="indexName" type="string" required>
+  Name for the index
+</ParamField>
+
+<ParamField path="field" type="string" required>
+  Field to index
+</ParamField>
+
+<ParamField path="unique" type="bool" required>
+  Whether the index should enforce uniqueness
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if index could not be created
+</ResponseField>
+
+**Example:**
+
+```go
+err := db.CreateIndex("users", "email_idx", "email", true)
+```
+
+### CreateCompoundIndex
+
+Creates a compound index on multiple fields.
+
+```go
+func (d *Database) CreateCompoundIndex(collectionName, indexName string, fields []string, unique bool) error
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="indexName" type="string" required>
+  Name for the index
+</ParamField>
+
+<ParamField path="fields" type="[]string" required>
+  Fields to include in the compound index
+</ParamField>
+
+<ParamField path="unique" type="bool" required>
+  Whether the index should enforce uniqueness
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if index could not be created
+</ResponseField>
+
+**Example:**
+
+```go
+err := db.CreateCompoundIndex("users", "name_age_idx", []string{"name", "age"}, false)
+```
+
+### CreateTextIndex
+
+Creates a full-text search index.
+
+```go
+func (d *Database) CreateTextIndex(collectionName, indexName, field string) error
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="indexName" type="string" required>
+  Name for the index
+</ParamField>
+
+<ParamField path="field" type="string" required>
+  Text field to index
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if index could not be created
+</ResponseField>
+
+**Example:**
+
+```go
+err := db.CreateTextIndex("articles", "content_text_idx", "content")
+```
+
+### DropIndex
+
+Drops an index from a collection.
+
+```go
+func (d *Database) DropIndex(collectionName, indexName string) error
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="indexName" type="string" required>
+  Name of the index to drop
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if index could not be dropped
+</ResponseField>
+
+**Example:**
+
+```go
+err := db.DropIndex("users", "email_idx")
+```
+
+### ListIndexes
+
+Returns all indexes for a collection.
+
+```go
+func (d *Database) ListIndexes(collectionName string) ([]IndexInfo, error)
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="[]IndexInfo" type="[]IndexInfo">
+  List of index metadata
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if indexes could not be listed
+</ResponseField>
+
+**Example:**
+
+```go
+indexes, err := db.ListIndexes("users")
+for _, idx := range indexes {
+    fmt.Printf("Index: %s, Fields: %v, Unique: %v\n", idx.Name, idx.Fields, idx.Unique)
+}
+```
+
+## Schema validation
+
+### SetSchema
+
+Sets a JSON schema for a collection.
+
+```go
+func (d *Database) SetSchema(collectionName string, schema map[string]interface{}) error
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="schema" type="map[string]interface{}" required>
+  JSON schema for validation
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if schema could not be set
+</ResponseField>
+
+**Example:**
+
+```go
+schema := map[string]interface{}{
+    "type": "object",
+    "properties": map[string]interface{}{
+        "name": map[string]interface{}{"type": "string"},
+        "age": map[string]interface{}{"type": "number"},
+    },
+    "required": []string{"name"},
+}
+err := db.SetSchema("users", schema)
+```
+
+### GetSchema
+
+Gets the JSON schema for a collection.
+
+```go
+func (d *Database) GetSchema(collectionName string) (map[string]interface{}, error)
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="map[string]interface{}" type="map[string]interface{}">
+  JSON schema, or nil if no schema is set
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if schema could not be retrieved
+</ResponseField>
+
+### RemoveSchema
+
+Removes the JSON schema from a collection.
+
+```go
+func (d *Database) RemoveSchema(collectionName string) error
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if schema could not be removed
+</ResponseField>
+
+## Maintenance
+
+### Checkpoint
+
+Performs a manual WAL checkpoint.
+
+```go
+func (d *Database) Checkpoint() error
+```
+
+<ResponseField name="error" type="error">
+  Error if checkpoint failed
+</ResponseField>
+
+### Backup
+
+Creates a backup of the database.
+
+```go
+func (d *Database) Backup(destPath string) error
+```
+
+<ParamField path="destPath" type="string" required>
+  Destination path for the backup file
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if backup failed
+</ResponseField>
+
+**Example:**
+
+```go
+err := db.Backup("/backups/my_database_backup.db")
+```
+
+### VerifyBackup
+
+Verifies a backup file.
+
+```go
+func VerifyBackup(backupPath string) (map[string]interface{}, error)
+```
+
+<ParamField path="backupPath" type="string" required>
+  Path to the backup file
+</ParamField>
+
+<ResponseField name="map[string]interface{}" type="map[string]interface{}">
+  Backup verification information
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if verification failed
+</ResponseField>
+
+### GarbageCollect
+
+Performs garbage collection and returns statistics.
+
+```go
+func (d *Database) GarbageCollect() (map[string]interface{}, error)
+```
+
+<ResponseField name="map[string]interface{}" type="map[string]interface{}">
+  Garbage collection statistics
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if garbage collection failed
+</ResponseField>
+
+### Metrics
+
+Returns database metrics.
+
+```go
+func (d *Database) Metrics() (map[string]interface{}, error)
+```
+
+<ResponseField name="map[string]interface{}" type="map[string]interface{}">
+  Database metrics including reads, writes, cache hits, etc.
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if metrics could not be retrieved
+</ResponseField>
+
+### FrameCount
+
+Returns the current WAL frame count.
+
+```go
+func (d *Database) FrameCount() (int64, error)
+```
+
+<ResponseField name="int64" type="int64">
+  Number of WAL frames
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if frame count could not be retrieved
+</ResponseField>
+
+## Collection access
+
+### GetCollection
+
+Gets a collection handle for non-transactional operations.
+
+```go
+func (d *Database) GetCollection(name string) (*Collection, error)
+```
+
+<ParamField path="name" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="*Collection" type="*Collection">
+  Collection handle
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if collection could not be obtained
+</ResponseField>
+
+**Example:**
+
+```go
+coll, err := db.GetCollection("users")
+if err != nil {
+    log.Fatal(err)
+}
+defer coll.Free()
+
+doc := map[string]interface{}{"name": "Bob", "age": 25}
+id, err := coll.Insert(doc)
+```

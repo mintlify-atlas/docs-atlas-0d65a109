@@ -1,0 +1,434 @@
+---
+title: Collection commands
+description: Create, manage, and inspect collections with the jasonisnthappy CLI
+---
+
+Collection commands provide operations for managing collections within your database.
+
+## collection list
+
+List all collections in the database with document counts.
+
+```bash
+jasonisnthappy <DATABASE> collection list
+```
+
+### Example
+
+```bash
+jasonisnthappy mydb.db collection list
+```
+
+### Output
+
+<Tabs>
+  <Tab title="pretty">
+    ```
+    Collections (3):
+      • users (1,234 documents)
+      • orders (5,678 documents)
+      • products (432 documents)
+    ```
+  </Tab>
+  
+  <Tab title="table">
+    ```
+    ┌──────────┬───────────┐
+    │ Name     │ Documents │
+    ├──────────┼───────────┤
+    │ users    │ 1,234     │
+    │ orders   │ 5,678     │
+    │ products │ 432       │
+    └──────────┴───────────┘
+    ```
+  </Tab>
+  
+  <Tab title="json">
+    ```json
+    [
+      {"name":"users","document_count":1234},
+      {"name":"orders","document_count":5678},
+      {"name":"products","document_count":432}
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+## collection create
+
+Create a new collection. Collections are created automatically on first insert, but explicit creation can be useful for setting up schemas or indexes beforehand.
+
+```bash
+jasonisnthappy <DATABASE> collection create <NAME>
+```
+
+### Arguments
+
+- `name` - Name of the collection to create
+
+### Example
+
+<CodeGroup>
+```bash Create users collection
+jasonisnthappy mydb.db collection create users
+```
+
+```bash Create orders collection
+jasonisnthappy mydb.db collection create orders
+```
+</CodeGroup>
+
+### Output
+
+```
+✓ Collection 'users' created successfully
+```
+
+<Note>
+Collection names must be unique within a database. Creating a collection that already exists will return an error.
+</Note>
+
+## collection drop
+
+Permanently delete a collection and all its documents, indexes, and schemas.
+
+```bash
+jasonisnthappy <DATABASE> collection drop <NAME>
+```
+
+### Arguments
+
+- `name` - Name of the collection to drop
+
+### Example
+
+```bash
+jasonisnthappy mydb.db collection drop temp_data
+```
+
+### Output
+
+```
+✓ Collection 'temp_data' dropped successfully
+  Documents deleted: 1,234
+  Indexes removed: 3
+```
+
+<Warning>
+This operation is irreversible. All documents in the collection will be permanently deleted.
+</Warning>
+
+## collection info
+
+Display detailed information about a specific collection including document count, size, indexes, and schema.
+
+```bash
+jasonisnthappy <DATABASE> collection info <NAME>
+```
+
+### Arguments
+
+- `name` - Name of the collection to inspect
+
+### Example
+
+```bash
+jasonisnthappy mydb.db collection info users
+```
+
+### Output
+
+<Tabs>
+  <Tab title="pretty">
+    ```
+    Collection: users
+    
+    Statistics:
+      Documents: 1,234
+      Size: 456 KB
+      Average Document Size: 379 bytes
+      
+    Indexes:
+      • email (unique)
+      • created_at
+      • age
+      
+    Schema:
+      Validation: enabled
+      Required fields: name, email
+      
+    Created: 2025-01-15 10:30:22
+    Modified: 2025-03-03 14:22:11
+    ```
+  </Tab>
+  
+  <Tab title="json">
+    ```json
+    {
+      "name": "users",
+      "document_count": 1234,
+      "size_bytes": 467968,
+      "average_doc_size": 379,
+      "indexes": [
+        {"field":"email","unique":true},
+        {"field":"created_at","unique":false},
+        {"field":"age","unique":false}
+      ],
+      "schema": {
+        "enabled": true,
+        "required": ["name","email"]
+      },
+      "created_at": "2025-01-15T10:30:22Z",
+      "modified_at": "2025-03-03T14:22:11Z"
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## index list
+
+List all indexes for a collection.
+
+```bash
+jasonisnthappy <DATABASE> index list <COLLECTION>
+```
+
+### Arguments
+
+- `collection` - Name of the collection
+
+### Example
+
+```bash
+jasonisnthappy mydb.db index list users
+```
+
+### Output
+
+<Tabs>
+  <Tab title="pretty">
+    ```
+    Indexes for collection 'users':
+      • email (unique)
+      • created_at
+      • age
+      • status
+    ```
+  </Tab>
+  
+  <Tab title="table">
+    ```
+    ┌────────────┬────────┐
+    │ Field      │ Unique │
+    ├────────────┼────────┤
+    │ email      │ ✓      │
+    │ created_at │        │
+    │ age        │        │
+    │ status     │        │
+    └────────────┴────────┘
+    ```
+  </Tab>
+  
+  <Tab title="json">
+    ```json
+    [
+      {"field":"email","unique":true},
+      {"field":"created_at","unique":false},
+      {"field":"age","unique":false},
+      {"field":"status","unique":false}
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+## index create
+
+Create an index on a field to improve query performance.
+
+```bash
+jasonisnthappy <DATABASE> index create <COLLECTION> <FIELD> [--unique]
+```
+
+### Arguments
+
+- `collection` - Name of the collection
+- `field` - Field name to index (supports dot notation for nested fields)
+
+### Flags
+
+- `--unique` / `-u` - Make this a unique index (prevents duplicate values)
+
+### Examples
+
+<CodeGroup>
+```bash Regular index
+jasonisnthappy mydb.db index create users email
+```
+
+```bash Unique index
+jasonisnthappy mydb.db index create users email --unique
+```
+
+```bash Nested field index
+jasonisnthappy mydb.db index create users "profile.age"
+```
+</CodeGroup>
+
+### Output
+
+```
+✓ Index created on field 'email'
+  Collection: users
+  Unique: true
+  Documents indexed: 1,234
+  Duration: 45ms
+```
+
+<Tip>
+Indexes dramatically improve query performance but use additional disk space. Create indexes for fields you frequently query.
+</Tip>
+
+## index drop
+
+Remove an index from a collection.
+
+```bash
+jasonisnthappy <DATABASE> index drop <COLLECTION> <NAME>
+```
+
+### Arguments
+
+- `collection` - Name of the collection
+- `name` - Name of the index (field name)
+
+### Example
+
+```bash
+jasonisnthappy mydb.db index drop users email
+```
+
+### Output
+
+```
+✓ Index 'email' dropped from collection 'users'
+```
+
+## schema set
+
+Set or update the JSON Schema validation for a collection.
+
+```bash
+jasonisnthappy <DATABASE> schema set <COLLECTION> <SCHEMA>
+```
+
+### Arguments
+
+- `collection` - Name of the collection
+- `schema` - JSON Schema definition (as JSON string)
+
+### Example
+
+```bash
+jasonisnthappy mydb.db schema set users '{
+  "type": "object",
+  "required": ["name", "email"],
+  "properties": {
+    "name": {"type": "string"},
+    "email": {"type": "string", "format": "email"},
+    "age": {"type": "number", "minimum": 0}
+  }
+}'
+```
+
+### Output
+
+```
+✓ Schema set for collection 'users'
+  Required fields: name, email
+  Optional fields: age
+```
+
+<Note>
+Setting a schema validates future inserts and updates but doesn't automatically validate existing documents. Use `schema validate` to check existing data.
+</Note>
+
+## schema get
+
+Retrieve the current schema for a collection.
+
+```bash
+jasonisnthappy <DATABASE> schema get <COLLECTION>
+```
+
+### Arguments
+
+- `collection` - Name of the collection
+
+### Example
+
+```bash
+jasonisnthappy mydb.db schema get users
+```
+
+### Output
+
+```json
+{
+  "type": "object",
+  "required": ["name", "email"],
+  "properties": {
+    "name": {"type": "string"},
+    "email": {"type": "string", "format": "email"},
+    "age": {"type": "number", "minimum": 0}
+  }
+}
+```
+
+## schema validate
+
+Validate all existing documents in a collection against the current schema.
+
+```bash
+jasonisnthappy <DATABASE> schema validate <COLLECTION>
+```
+
+### Arguments
+
+- `collection` - Name of the collection
+
+### Example
+
+```bash
+jasonisnthappy mydb.db schema validate users
+```
+
+### Output
+
+```
+Validating collection 'users'...
+
+✓ Valid documents: 1,230
+✗ Invalid documents: 4
+
+Invalid documents:
+  ID 567: Missing required field 'email'
+  ID 890: Field 'age' must be >= 0
+  ID 1024: Invalid email format
+  ID 1234: Field 'name' must be string
+```
+
+<Tip>
+Run schema validation after setting a new schema to identify documents that need updating.
+</Tip>
+
+## Related commands
+
+<CardGroup cols={2}>
+  <Card title="Document commands" icon="file" href="/cli/document-commands">
+    Insert, query, and modify documents
+  </Card>
+  
+  <Card title="Database commands" icon="database" href="/cli/database-commands">
+    Database-level operations
+  </Card>
+</CardGroup>

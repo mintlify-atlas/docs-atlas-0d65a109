@@ -1,0 +1,372 @@
+---
+title: Transaction
+description: Transactional operations for jasonisnthappy Go bindings
+---
+
+The `Transaction` type represents a database transaction.
+
+## Transaction lifecycle
+
+### Commit
+
+Commits the transaction.
+
+```go
+func (t *Transaction) Commit() error
+```
+
+<ResponseField name="error" type="error">
+  Error if the transaction could not be committed
+</ResponseField>
+
+**Example:**
+
+```go
+tx, err := db.BeginTransaction()
+if err != nil {
+    log.Fatal(err)
+}
+defer tx.Rollback()
+
+// ... perform operations ...
+
+err = tx.Commit()
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### Rollback
+
+Rolls back the transaction. Safe to call multiple times.
+
+```go
+func (t *Transaction) Rollback()
+```
+
+**Example:**
+
+```go
+tx, err := db.BeginTransaction()
+if err != nil {
+    log.Fatal(err)
+}
+defer tx.Rollback() // Automatically rollback if not committed
+
+// ... perform operations ...
+```
+
+### IsActive
+
+Returns whether the transaction is still active.
+
+```go
+func (t *Transaction) IsActive() bool
+```
+
+<ResponseField name="bool" type="bool">
+  True if the transaction is active
+</ResponseField>
+
+## Document operations
+
+### Insert
+
+Inserts a document into a collection.
+
+```go
+func (t *Transaction) Insert(collectionName string, doc interface{}) (string, error)
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="doc" type="interface{}" required>
+  Document to insert (typically a map or struct)
+</ParamField>
+
+<ResponseField name="string" type="string">
+  ID of the inserted document
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if the document could not be inserted
+</ResponseField>
+
+**Example:**
+
+```go
+tx, err := db.BeginTransaction()
+if err != nil {
+    log.Fatal(err)
+}
+defer tx.Rollback()
+
+doc := map[string]interface{}{
+    "name": "Alice",
+    "age":  30,
+    "email": "alice@example.com",
+}
+id, err := tx.Insert("users", doc)
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("Inserted document with ID: %s\n", id)
+
+tx.Commit()
+```
+
+### FindByID
+
+Finds a document by its ID.
+
+```go
+func (t *Transaction) FindByID(collectionName, id string, result interface{}) (bool, error)
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Document ID to find
+</ParamField>
+
+<ParamField path="result" type="interface{}" required>
+  Pointer to store the result
+</ParamField>
+
+<ResponseField name="bool" type="bool">
+  True if the document was found
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if the operation failed
+</ResponseField>
+
+**Example:**
+
+```go
+var result map[string]interface{}
+found, err := tx.FindByID("users", "user123", &result)
+if err != nil {
+    log.Fatal(err)
+}
+if found {
+    fmt.Printf("Found: %+v\n", result)
+} else {
+    fmt.Println("Document not found")
+}
+```
+
+### UpdateByID
+
+Updates a document by its ID.
+
+```go
+func (t *Transaction) UpdateByID(collectionName, id string, doc interface{}) error
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Document ID to update
+</ParamField>
+
+<ParamField path="doc" type="interface{}" required>
+  Updated document data
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if the document could not be updated
+</ResponseField>
+
+**Example:**
+
+```go
+updatedDoc := map[string]interface{}{
+    "name": "Alice Smith",
+    "age":  31,
+    "email": "alice@example.com",
+}
+err := tx.UpdateByID("users", "user123", updatedDoc)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### DeleteByID
+
+Deletes a document by its ID.
+
+```go
+func (t *Transaction) DeleteByID(collectionName, id string) error
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Document ID to delete
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if the document could not be deleted
+</ResponseField>
+
+**Example:**
+
+```go
+err := tx.DeleteByID("users", "user123")
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### FindAll
+
+Finds all documents in a collection.
+
+```go
+func (t *Transaction) FindAll(collectionName string, result interface{}) error
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="result" type="interface{}" required>
+  Pointer to a slice to store the results
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if the operation failed
+</ResponseField>
+
+**Example:**
+
+```go
+var all []map[string]interface{}
+err := tx.FindAll("users", &all)
+if err != nil {
+    log.Fatal(err)
+}
+for _, doc := range all {
+    fmt.Printf("User: %+v\n", doc)
+}
+```
+
+### Count
+
+Returns the number of documents in a collection.
+
+```go
+func (t *Transaction) Count(collectionName string) (int64, error)
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="int64" type="int64">
+  Number of documents
+</ResponseField>
+
+<ResponseField name="error" type="error">
+  Error if the count could not be retrieved
+</ResponseField>
+
+**Example:**
+
+```go
+count, err := tx.Count("users")
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("Total users: %d\n", count)
+```
+
+## Collection management
+
+### CreateCollection
+
+Creates a new collection within the transaction.
+
+```go
+func (t *Transaction) CreateCollection(name string) error
+```
+
+<ParamField path="name" type="string" required>
+  Name of the collection to create
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if the collection could not be created
+</ResponseField>
+
+**Example:**
+
+```go
+err := tx.CreateCollection("products")
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### DropCollection
+
+Drops a collection within the transaction.
+
+```go
+func (t *Transaction) DropCollection(name string) error
+```
+
+<ParamField path="name" type="string" required>
+  Name of the collection to drop
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if the collection could not be dropped
+</ResponseField>
+
+**Example:**
+
+```go
+err := tx.DropCollection("old_data")
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+### RenameCollection
+
+Renames a collection within the transaction.
+
+```go
+func (t *Transaction) RenameCollection(oldName, newName string) error
+```
+
+<ParamField path="oldName" type="string" required>
+  Current name of the collection
+</ParamField>
+
+<ParamField path="newName" type="string" required>
+  New name for the collection
+</ParamField>
+
+<ResponseField name="error" type="error">
+  Error if the collection could not be renamed
+</ResponseField>
+
+**Example:**
+
+```go
+err := tx.RenameCollection("users", "customers")
+if err != nil {
+    log.Fatal(err)
+}
+```

@@ -1,0 +1,559 @@
+---
+title: Schema validation
+description: Enforce document structure with JSON Schema validation
+---
+
+Schema validation ensures your documents conform to a defined structure, preventing invalid data from entering your database.
+
+## Why use schema validation?
+
+<CardGroup cols={2}>
+  <Card title="Data integrity" icon="shield-check">
+    Prevent invalid documents from being inserted or updated
+  </Card>
+  <Card title="Type safety" icon="code">
+    Enforce field types, required fields, and value constraints
+  </Card>
+  <Card title="Documentation" icon="book">
+    Schema serves as documentation for your data model
+  </Card>
+  <Card title="Validation errors" icon="circle-exclamation">
+    Get clear error messages when validation fails
+  </Card>
+</CardGroup>
+
+## Basic schema
+
+### Creating a schema
+
+Schemas are defined using a JSON Schema-like structure.
+
+```rust
+use jasonisnthappy::{Database, Schema, ValueType};
+use std::collections::HashMap;
+
+let db = Database::open("my.db")?;
+
+// Create a simple schema
+let mut schema = Schema::new();
+schema.value_type = Some(ValueType::Object);
+schema.required = Some(vec!["name".to_string(), "email".to_string()]);
+
+// Set the schema on the collection
+db.set_schema("users", schema)?;
+
+println!("Schema applied to users collection");
+```
+
+### Validation in action
+
+```rust
+let users = db.collection("users");
+
+// ✅ Valid: has required fields
+users.insert(json!({
+    "name": "Alice",
+    "email": "alice@example.com"
+}))?;
+
+// ❌ Invalid: missing required field "email"
+let result = users.insert(json!({
+    "name": "Bob"
+}));
+assert!(result.is_err());
+```
+
+## Type validation
+
+### Supported types
+
+Jasonisnthappy supports these JSON types:
+
+- `ValueType::String` - String values
+- `ValueType::Number` - Numeric values (integers or floats)
+- `ValueType::Integer` - Integer values only
+- `ValueType::Boolean` - true/false
+- `ValueType::Object` - Nested objects
+- `ValueType::Array` - Arrays
+- `ValueType::Null` - Null values
+
+### Type enforcement
+
+```rust
+let mut schema = Schema::new();
+schema.value_type = Some(ValueType::Object);
+
+let mut properties = HashMap::new();
+
+// String field
+let mut name_schema = Schema::new();
+name_schema.value_type = Some(ValueType::String);
+properties.insert("name".to_string(), name_schema);
+
+// Integer field
+let mut age_schema = Schema::new();
+age_schema.value_type = Some(ValueType::Integer);
+properties.insert("age".to_string(), age_schema);
+
+// Boolean field
+let mut active_schema = Schema::new();
+active_schema.value_type = Some(ValueType::Boolean);
+properties.insert("active".to_string(), active_schema);
+
+schema.properties = Some(properties);
+db.set_schema("users", schema)?;
+```
+
+<CodeGroup>
+```rust Valid document
+users.insert(json!({
+    "name": "Alice",
+    "age": 30,
+    "active": true
+}))?;  // ✅ OK
+```
+
+```rust Invalid types
+// ❌ age must be integer
+users.insert(json!({
+    "name": "Bob",
+    "age": "30",  // String, not integer
+    "active": true
+}))?;  // Error!
+
+// ❌ active must be boolean
+users.insert(json!({
+    "name": "Charlie",
+    "age": 25,
+    "active": "yes"  // String, not boolean
+}))?;  // Error!
+```
+</CodeGroup>
+
+## Field constraints
+
+### String constraints
+
+Validate string length and content.
+
+```rust
+let mut email_schema = Schema::new();
+email_schema.value_type = Some(ValueType::String);
+email_schema.min_length = Some(5);   // At least 5 characters
+email_schema.max_length = Some(100); // At most 100 characters
+
+properties.insert("email".to_string(), email_schema);
+```
+
+```rust
+// ✅ Valid: within length bounds
+users.insert(json!({"email": "alice@example.com"}))?;
+
+// ❌ Invalid: too short
+users.insert(json!({"email": "a@b"}))?;  // Error!
+
+// ❌ Invalid: too long
+users.insert(json!({"email": "a".repeat(101)}))?;  // Error!
+```
+
+### Number constraints
+
+Validate numeric ranges.
+
+```rust
+let mut age_schema = Schema::new();
+age_schema.value_type = Some(ValueType::Integer);
+age_schema.minimum = Some(0.0);    // Non-negative
+age_schema.maximum = Some(150.0);  // Reasonable maximum
+
+properties.insert("age".to_string(), age_schema);
+```
+
+```rust
+// ✅ Valid: within range
+users.insert(json!({"age": 30}))?;
+
+// ❌ Invalid: below minimum
+users.insert(json!({"age": -5}))?;  // Error!
+
+// ❌ Invalid: above maximum
+users.insert(json!({"age": 200}))?;  // Error!
+```
+
+### Array constraints
+
+Validate array length and item types.
+
+```rust
+let mut tags_schema = Schema::new();
+tags_schema.value_type = Some(ValueType::Array);
+tags_schema.min_length = Some(1);   // At least one tag
+tags_schema.max_length = Some(10);  // Maximum 10 tags
+
+// Validate array items
+let mut item_schema = Schema::new();
+item_schema.value_type = Some(ValueType::String);
+tags_schema.items = Some(Box::new(item_schema));
+
+properties.insert("tags".to_string(), tags_schema);
+```
+
+```rust
+// ✅ Valid: array of strings
+users.insert(json!({
+    "tags": ["developer", "rust", "database"]
+}))?;
+
+// ❌ Invalid: empty array
+users.insert(json!({"tags": []}))?;  // Error!
+
+// ❌ Invalid: wrong item type
+users.insert(json!({"tags": ["valid", 123]}))?;  // Error!
+```
+
+## Enum validation
+
+Restrict fields to specific allowed values.
+
+```rust
+let mut status_schema = Schema::new();
+status_schema.enum_values = Some(vec![
+    json!("pending"),
+    json!("active"),
+    json!("inactive"),
+    json!("banned"),
+]);
+
+properties.insert("status".to_string(), status_schema);
+```
+
+```rust
+// ✅ Valid: one of the allowed values
+users.insert(json!({"status": "active"}))?;
+
+// ❌ Invalid: not in enum
+users.insert(json!({"status": "unknown"}))?;  // Error!
+```
+
+<Tip>
+Enum validation works with any JSON value type, not just strings:
+
+```rust
+let mut priority_schema = Schema::new();
+priority_schema.enum_values = Some(vec![json!(1), json!(2), json!(3)]);
+```
+</Tip>
+
+## Nested objects
+
+Validate structure of nested objects.
+
+```rust
+let mut schema = Schema::new();
+schema.value_type = Some(ValueType::Object);
+
+let mut properties = HashMap::new();
+
+// Define address schema (nested object)
+let mut address_schema = Schema::new();
+address_schema.value_type = Some(ValueType::Object);
+address_schema.required = Some(vec!["city".to_string(), "country".to_string()]);
+
+let mut address_props = HashMap::new();
+
+let mut city_schema = Schema::new();
+city_schema.value_type = Some(ValueType::String);
+address_props.insert("city".to_string(), city_schema);
+
+let mut country_schema = Schema::new();
+country_schema.value_type = Some(ValueType::String);
+address_props.insert("country".to_string(), country_schema);
+
+address_schema.properties = Some(address_props);
+properties.insert("address".to_string(), address_schema);
+
+schema.properties = Some(properties);
+db.set_schema("users", schema)?;
+```
+
+<Tabs>
+  <Tab title="Valid nested">
+    ```rust
+    users.insert(json!({
+        "name": "Alice",
+        "address": {
+            "city": "New York",
+            "country": "USA",
+            "zip": "10001"  // Optional field, OK
+        }
+    }))?;  // ✅ OK
+    ```
+  </Tab>
+  <Tab title="Missing required nested">
+    ```rust
+    users.insert(json!({
+        "name": "Bob",
+        "address": {
+            "city": "London"
+            // Missing required "country" field
+        }
+    }))?;  // ❌ Error!
+    ```
+  </Tab>
+  <Tab title="Wrong nested type">
+    ```rust
+    users.insert(json!({
+        "name": "Charlie",
+        "address": {
+            "city": 123,  // Should be string
+            "country": "Canada"
+        }
+    }))?;  // ❌ Error!
+    ```
+  </Tab>
+</Tabs>
+
+## Complete example
+
+Putting it all together: a complete user schema.
+
+```rust
+use jasonisnthappy::{Database, Schema, ValueType};
+use std::collections::HashMap;
+use serde_json::json;
+
+let db = Database::open("my.db")?;
+
+// Root schema
+let mut schema = Schema::new();
+schema.value_type = Some(ValueType::Object);
+schema.required = Some(vec![
+    "name".to_string(),
+    "email".to_string(),
+    "age".to_string(),
+]);
+
+let mut properties = HashMap::new();
+
+// Name: string, 1-100 characters
+let mut name_schema = Schema::new();
+name_schema.value_type = Some(ValueType::String);
+name_schema.min_length = Some(1);
+name_schema.max_length = Some(100);
+properties.insert("name".to_string(), name_schema);
+
+// Email: string, 5-255 characters
+let mut email_schema = Schema::new();
+email_schema.value_type = Some(ValueType::String);
+email_schema.min_length = Some(5);
+email_schema.max_length = Some(255);
+properties.insert("email".to_string(), email_schema);
+
+// Age: integer, 0-150
+let mut age_schema = Schema::new();
+age_schema.value_type = Some(ValueType::Integer);
+age_schema.minimum = Some(0.0);
+age_schema.maximum = Some(150.0);
+properties.insert("age".to_string(), age_schema);
+
+// Status: enum (optional)
+let mut status_schema = Schema::new();
+status_schema.enum_values = Some(vec![
+    json!("active"),
+    json!("inactive"),
+    json!("pending"),
+]);
+properties.insert("status".to_string(), status_schema);
+
+// Tags: array of strings (optional)
+let mut tags_schema = Schema::new();
+tags_schema.value_type = Some(ValueType::Array);
+tags_schema.max_length = Some(10);
+let mut tag_item = Schema::new();
+tag_item.value_type = Some(ValueType::String);
+tags_schema.items = Some(Box::new(tag_item));
+properties.insert("tags".to_string(), tags_schema);
+
+schema.properties = Some(properties);
+
+// Apply schema
+db.set_schema("users", schema)?;
+
+// Test validation
+let users = db.collection("users");
+
+// ✅ Valid document
+users.insert(json!({
+    "name": "Alice",
+    "email": "alice@example.com",
+    "age": 30,
+    "status": "active",
+    "tags": ["developer", "rust"]
+}))?;
+
+println!("User inserted successfully!");
+```
+
+## Managing schemas
+
+### Get current schema
+
+```rust
+if let Some(schema) = db.get_schema("users") {
+    println!("Schema: {:?}", schema);
+} else {
+    println!("No schema set");
+}
+```
+
+### Update schema
+
+Replace the existing schema with a new one.
+
+```rust
+let mut updated_schema = Schema::new();
+updated_schema.value_type = Some(ValueType::Object);
+// ... define fields ...
+
+db.set_schema("users", updated_schema)?;
+```
+
+<Warning>
+Updating a schema does not validate existing documents. Only new inserts and updates are validated.
+</Warning>
+
+### Remove schema
+
+Disable validation on a collection.
+
+```rust
+db.remove_schema("users")?;
+println!("Schema removed - validation disabled");
+```
+
+## Schema validation with updates
+
+Schemas are validated on both inserts and updates.
+
+```rust
+// Insert valid document
+let id = users.insert(json!({
+    "name": "Alice",
+    "email": "alice@example.com",
+    "age": 30
+}))?;
+
+// ✅ Valid update: age is still an integer
+users.update_by_id(&id, json!({"age": 31}))?;
+
+// ❌ Invalid update: age must be integer
+let result = users.update_by_id(&id, json!({"age": "thirty-one"}));
+assert!(result.is_err());
+```
+
+## Error messages
+
+Validation errors provide clear messages about what failed.
+
+```rust
+let result = users.insert(json!({
+    "name": "Bob",
+    "age": 200  // Exceeds maximum
+}));
+
+if let Err(e) = result {
+    println!("Validation error: {}", e);
+    // Output: "Schema validation error: Number at 'age' (200) exceeds maximum 150"
+}
+```
+
+## Best practices
+
+<Tip>
+**Start with required fields and types:**
+
+```rust
+let mut schema = Schema::new();
+schema.value_type = Some(ValueType::Object);
+schema.required = Some(vec!["id".to_string(), "name".to_string()]);
+```
+
+Add constraints (min/max, enum, etc.) as your requirements evolve.
+</Tip>
+
+<Tip>
+**Use enums for fixed sets of values:**
+
+```rust
+// Better than free-form strings
+status_schema.enum_values = Some(vec![
+    json!("draft"),
+    json!("published"),
+    json!("archived"),
+]);
+```
+</Tip>
+
+<Warning>
+**Don't over-constrain:**
+
+Excessively strict schemas make it hard to evolve your data model. Leave room for optional fields and future extensions.
+</Warning>
+
+## Common patterns
+
+### Email field
+
+```rust
+let mut email_schema = Schema::new();
+email_schema.value_type = Some(ValueType::String);
+email_schema.min_length = Some(5);
+email_schema.max_length = Some(255);
+// Note: For true email validation, validate in application code
+```
+
+### Timestamp field
+
+```rust
+let mut created_schema = Schema::new();
+created_schema.value_type = Some(ValueType::Integer);
+created_schema.minimum = Some(0.0);  // Unix timestamp (non-negative)
+```
+
+### Price field
+
+```rust
+let mut price_schema = Schema::new();
+price_schema.value_type = Some(ValueType::Number);
+price_schema.minimum = Some(0.0);  // Non-negative
+```
+
+### Polymorphic data
+
+For documents that can have different structures, omit strict validation:
+
+```rust
+// Minimal schema - allows flexibility
+let mut schema = Schema::new();
+schema.value_type = Some(ValueType::Object);
+schema.required = Some(vec!["type".to_string()]);
+
+// Validate "type" field in application code
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="CRUD operations" icon="database" href="/guides/crud-operations">
+    Insert and update with validation
+  </Card>
+  <Card title="Indexes" icon="bolt" href="/guides/indexes">
+    Create unique indexes for constraints
+  </Card>
+  <Card title="Aggregation" icon="chart-bar" href="/guides/aggregation">
+    Analyze validated data
+  </Card>
+  <Card title="Change streams" icon="rss" href="/guides/change-streams">
+    Watch for validation errors
+  </Card>
+</CardGroup>

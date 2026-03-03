@@ -1,0 +1,188 @@
+---
+title: Command line overview
+description: Command-line interface for jasonisnthappy document database
+---
+
+The jasonisnthappy CLI provides a powerful command-line interface for interacting with jasonisnthappy databases. It supports both one-off commands and an interactive REPL mode.
+
+## Installation
+
+The CLI is distributed as a binary executable:
+
+<CodeGroup>
+```bash macOS/Linux
+curl -fsSL https://jasonisnthappy.sh/install.sh | sh
+```
+
+```bash Cargo
+cargo install jasonisnthappy-cli
+```
+
+```bash From source
+git clone https://github.com/sohzm/jasonisnthappy
+cd jasonisnthappy/cli
+cargo build --release
+```
+</CodeGroup>
+
+## Basic usage
+
+The CLI follows this general syntax:
+
+```bash
+jasonisnthappy [DATABASE] [OPTIONS] [COMMAND]
+```
+
+### Quick examples
+
+<CodeGroup>
+```bash Show database info
+jasonisnthappy mydb.db db info
+```
+
+```bash Insert a document
+jasonisnthappy mydb.db doc insert users '{"name":"Alice","age":30}'
+```
+
+```bash Start interactive mode
+jasonisnthappy mydb.db --interactive
+```
+
+```bash Query with formatting
+jasonisnthappy mydb.db --format json doc find users '{"age":{"$gte":25}}'
+```
+</CodeGroup>
+
+## Global flags
+
+These flags are available for all commands:
+
+| Flag | Short | Default | Description |
+|------|-------|---------|-------------|
+| `--format` | `-f` | `pretty` | Output format: `json`, `table`, or `pretty` |
+| `--interactive` | `-i` | `false` | Start interactive REPL mode |
+| `--web-ui` | `-w` | `false` | Start web UI server |
+| `--web-address` | | `127.0.0.1:8080` | Web UI server address |
+
+<Note>
+If you specify a database path without any command, the CLI automatically enters interactive mode.
+</Note>
+
+## Output formats
+
+The CLI supports three output formats controlled by the `--format` flag:
+
+<Tabs>
+  <Tab title="pretty">
+    Colorized, human-readable output (default)
+    
+    ```bash
+    jasonisnthappy mydb.db --format pretty doc find users
+    ```
+    
+    ```
+    Found 2 documents:
+    
+    Document ID: 1
+    {
+      "name": "Alice",
+      "age": 30
+    }
+    
+    Document ID: 2
+    {
+      "name": "Bob",
+      "age": 25
+    }
+    ```
+  </Tab>
+  
+  <Tab title="json">
+    Raw JSON output for scripting
+    
+    ```bash
+    jasonisnthappy mydb.db --format json doc find users
+    ```
+    
+    ```json
+    [
+      {"_id":1,"name":"Alice","age":30},
+      {"_id":2,"name":"Bob","age":25}
+    ]
+    ```
+  </Tab>
+  
+  <Tab title="table">
+    Tabular output with borders
+    
+    ```bash
+    jasonisnthappy mydb.db --format table doc find users
+    ```
+    
+    ```
+    ┌─────┬───────┬─────┐
+    │ _id │ name  │ age │
+    ├─────┼───────┼─────┤
+    │ 1   │ Alice │ 30  │
+    │ 2   │ Bob   │ 25  │
+    └─────┴───────┴─────┘
+    ```
+  </Tab>
+</Tabs>
+
+## Web UI mode
+
+Launch a built-in web interface alongside the CLI:
+
+```bash
+jasonisnthappy mydb.db --web-ui
+```
+
+Customize the server address:
+
+```bash
+jasonisnthappy mydb.db --web-ui --web-address 0.0.0.0:3000
+```
+
+<Tip>
+The web UI runs in the background and provides a visual dashboard for browsing collections, running queries, and viewing metrics.
+</Tip>
+
+## Command categories
+
+Commands are organized into logical groups:
+
+- **[Database commands](/cli/database-commands)** - Database-level operations like backup, compaction, and info
+- **[Collection commands](/cli/collection-commands)** - Create, drop, and manage collections
+- **[Document commands](/cli/document-commands)** - Insert, find, update, and delete documents
+- **[REPL mode](/cli/repl)** - Interactive shell for database exploration
+
+## Exit codes
+
+The CLI uses standard exit codes:
+
+| Code | Meaning |
+|------|----------|
+| 0 | Success |
+| 1 | General error (invalid syntax, database error, etc.) |
+| 2 | Missing required argument |
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Database commands" icon="database" href="/cli/database-commands">
+    Backup, compact, and inspect your database
+  </Card>
+  
+  <Card title="Document commands" icon="file" href="/cli/document-commands">
+    Insert, query, and modify documents
+  </Card>
+  
+  <Card title="Interactive REPL" icon="terminal" href="/cli/repl">
+    Explore your database interactively
+  </Card>
+  
+  <Card title="Collection commands" icon="folder" href="/cli/collection-commands">
+    Manage collections and schemas
+  </Card>
+</CardGroup>

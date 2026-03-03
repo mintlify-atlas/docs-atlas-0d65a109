@@ -1,0 +1,402 @@
+---
+title: Transactions
+description: ACID transaction guarantees with commit, rollback, and conflict detection
+---
+
+jasonisnthappy provides full **ACID transactions** with snapshot isolation. Every read and write operation happens within a transaction, ensuring data consistency even under concurrent access.
+
+## Transaction lifecycle
+
+### Creating a transaction
+
+Call `db.begin()` to start a new transaction:
+
+```rust
+use jasonisnthappy::core::database::Database;
+
+let db = Database::open("mydb.db")?;
+let mut tx = db.begin()?;
+
+// Transaction is now active
+assert!(tx.is_active());
+```
+
+When a transaction begins (src/core/transaction.rs:56):
+
+1. **Allocate transaction ID** - Globally unique, monotonically increasing (xmin)
+2. **Capture snapshot ID** - Timestamp of the latest committed transaction
+3. **Take collection roots snapshot** - Record current B-tree root for each collection
+4. **Register with MVCC manager** - Track as active transaction
+
+<Info>
+The snapshot ID determines which document versions this transaction can see. See [MVCC](/concepts/mvcc) for details.
+</Info>
+
+### Working with collections
+
+Access collections through the transaction:
+
+```rust
+let mut users = tx.collection("users")?;
+
+// Insert
+let id = users.insert(json!({"name": "Alice", "age": 30}))?;
+
+// Update
+users.update(&id, json!({"name": "Alice", "age": 31}))?;
+
+// Delete
+users.delete(&id)?;
+
+// Query (sees uncommitted changes within this transaction)
+let doc = users.find_one(&id)?;
+```
+
+All modifications are **buffered in memory** until commit. Other transactions cannot see these changes yet.
+
+### Committing changes
+
+Call `commit()` to persist changes atomically:
+
+```rust
+tx.commit()?;  // Either all changes persist, or none do
+```
+
+**Commit process** (src/core/transaction.rs:445):
+
+1. **Conflict detection** - Check if other transactions modified the same documents
+2. **Acquire commit lock** - Serialize commits (one at a time)
+3. **Write to WAL** - Log all page changes with checksums
+4. **Write to pager** - Update in-memory cache
+5. **Sync WAL to disk** - fsync() for durability
+6. **Update metadata** - Atomically update collection B-tree roots
+7. **Mark transaction as committed** - Update MVCC state
+8. **Emit change events** - Notify watchers of inserts/updates/deletes
+
+<Note>
+The commit lock ensures **serializability**: commits happen one at a time, preventing conflicting concurrent writes. Reads never acquire this lock.
+</Note>
+
+### Rolling back changes
+
+Call `rollback()` to discard all changes:
+
+```rust
+let mut tx = db.begin()?;
+let mut users = tx.collection("users")?;
+
+users.insert(json!({"name": "Bob"}))?;
+
+tx.rollback()?;  // Insert is discarded
+```
+
+Rollback is **instant** - it simply clears the in-memory write buffer without touching the database file.
+
+## ACID guarantees
+
+### Atomicity
+
+Either **all changes commit** or **none do**. If a transaction fails halfway through commit (e.g., disk full), the WAL ensures the database remains consistent.
+
+**Example: Atomic transfer**
+```rust
+let mut tx = db.begin()?;
+let mut accounts = tx.collection("accounts")?;
+
+// Debit account A
+let mut account_a = accounts.find_one("alice")?;
+account_a["balance"] = json!(account_a["balance"].as_f64().unwrap() - 100.0);
+accounts.update("alice", account_a)?;
+
+// Credit account B
+let mut account_b = accounts.find_one("bob")?;
+account_b["balance"] = json!(account_b["balance"].as_f64().unwrap() + 100.0);
+accounts.update("bob", account_b)?;
+
+tx.commit()?;  // Both updates or neither
+```
+
+If the process crashes during commit, WAL replay ensures both updates are applied or both are discarded.
+
+### Consistency
+
+Transactions move the database from one valid state to another. Schema validation (if configured) runs before commit:
+
+```rust
+db.set_schema("users", schema)?;
+
+let mut tx = db.begin()?;
+let mut users = tx.collection("users")?;
+
+// This will fail at commit if schema validation fails
+users.insert(json!({"name": 123}))?;  // name must be string
+tx.commit()?;  // Error: schema validation failed
+```
+
+See the [Schema API reference](/api/rust/schema) for schema configuration.
+
+### Isolation
+
+jasonisnthappy provides **snapshot isolation** through MVCC:
+
+- Each transaction sees a consistent snapshot from when it began
+- Reads never block writes, writes never block reads
+- Concurrent transactions operate on independent snapshots
+
+**Example: Concurrent reads**
+```rust
+// Thread 1: Long-running read
+let tx1 = db.begin()?;
+let users1 = tx1.collection("users")?;
+let count_before = users1.count()?;  // 100 documents
+
+// Thread 2: Insert new document
+let mut tx2 = db.begin()?;
+let mut users2 = tx2.collection("users")?;
+users2.insert(json!({"name": "Charlie"}))?;
+tx2.commit()?;
+
+// Thread 1: Still sees old snapshot
+let count_after = users1.count()?;  // Still 100 documents!
+```
+
+See [MVCC](/concepts/mvcc) for implementation details.
+
+### Durability
+
+Committed changes survive crashes through the **write-ahead log**:
+
+1. Changes are written to WAL before commit succeeds
+2. WAL is synced to disk with `fsync()`
+3. On database open, WAL is replayed to recover uncommitted changes
+
+<Warning>
+Durability requires `fsync()`, which is slow (~8ms per commit on typical SSDs). For higher throughput, use batch operations or increase `max_bulk_operations`.
+</Warning>
+
+## Write conflicts
+
+jasonisnthappy uses **optimistic concurrency control**: transactions detect conflicts at commit time.
+
+### Conflict detection
+
+A conflict occurs when:
+1. This transaction modifies a document
+2. Another transaction committed changes to the same document after our snapshot
+
+**Example: Lost update prevented**
+```rust
+// Initial state: {"name": "Alice", "score": 100}
+
+// Transaction 1: Read score
+let tx1 = db.begin()?;
+let users1 = tx1.collection("users")?;
+let alice1 = users1.find_one("alice")?;
+let new_score1 = alice1["score"].as_i64().unwrap() + 10;
+
+// Transaction 2: Read and update score
+let mut tx2 = db.begin()?;
+let mut users2 = tx2.collection("users")?;
+let mut alice2 = users2.find_one("alice")?;
+alice2["score"] = json!(120);
+users2.update("alice", alice2)?;
+tx2.commit()?;  // ✓ Succeeds, score is now 120
+
+// Transaction 1: Try to commit
+let mut alice1_update = alice1.clone();
+alice1_update["score"] = json!(new_score1);
+users1.update("alice", alice1_update)?;
+tx1.commit()?;  // ✗ Error::TxConflict - alice was modified!
+```
+
+The commit fails with `Error::TxConflict` because transaction 2 modified alice after transaction 1's snapshot.
+
+**How it works** (src/core/transaction.rs:357):
+
+```rust
+fn detect_write_conflicts(&self, collection_name: &str, current_root: PageNum) -> Result<()> {
+    // For each document we modified:
+    for (doc_id, _) in collection_writes.iter() {
+        // Get the xmin we saw when we first read it
+        let original_xmin = doc_original_xmin.get(doc_id)?;
+        
+        // Read the CURRENT committed version from B-tree
+        let committed_vdoc = read_versioned_document(pager, page_num)?;
+        
+        // Conflict if xmin changed AND new version is after our snapshot
+        if committed_vdoc.xmin != original_xmin && 
+           committed_vdoc.xmin > self.snapshot_id {
+            return Err(Error::TxConflict);
+        }
+    }
+}
+```
+
+<Tip>
+**New inserts never conflict** - if a document didn't exist in your snapshot, no conflict check is needed. This optimization is at src/core/transaction.rs:401.
+</Tip>
+
+### Automatic retry
+
+Use `run_transaction()` to automatically retry on conflicts:
+
+```rust
+let result = db.run_transaction(|tx| {
+    let mut users = tx.collection("users")?;
+    let mut alice = users.find_one("alice")?;
+    
+    alice["score"] = json!(alice["score"].as_i64().unwrap() + 10);
+    users.update("alice", alice)?;
+    
+    Ok(alice["score"].as_i64().unwrap())
+})?;
+```
+
+**Retry behavior** (src/core/database.rs:763):
+- Default: 3 retries with exponential backoff
+- Backoff: 1ms, 2ms, 4ms, ..., max 100ms
+- Configurable via `TransactionConfig`
+
+```rust
+db.set_transaction_config(TransactionConfig {
+    max_retries: 5,
+    retry_backoff_base_ms: 2,
+    max_retry_backoff_ms: 200,
+});
+```
+
+## Batch commits
+
+jasonisnthappy can group multiple transactions into a single fsync for higher throughput (src/core/transaction.rs:479).
+
+**How it works:**
+
+1. Transactions submit to a queue and wait
+2. First transaction becomes the "leader" (acquires commit lock)
+3. Leader collects pending transactions (up to `max_batch_size`)
+4. Leader commits all transactions together in one WAL fsync
+5. Leader notifies all waiters with results
+
+**Configuration:**
+
+```rust
+pub struct BatchConfig {
+    pub enabled: bool,                  // Default: true
+    pub max_batch_size: usize,          // Default: 32 transactions
+    pub collect_timeout_micros: u64,    // Default: 100µs
+}
+```
+
+**Benefits:**
+- 10-20x higher write throughput under contention
+- Amortizes fsync cost across multiple commits
+- Linear scaling with thread count (see README.md:64)
+
+<Note>
+Batch commits maintain ACID semantics - each transaction still commits atomically and sees a consistent snapshot.
+</Note>
+
+## Transaction states
+
+Transactions progress through three states (src/core/transaction.rs:17):
+
+```rust
+pub enum TxState {
+    Active,       // Can read and write
+    Committed,    // Changes are durable
+    RolledBack,   // Changes discarded
+}
+```
+
+Once a transaction is committed or rolled back, all further operations return `Error::TxAlreadyDone`.
+
+## Collection operations
+
+Transactions can also create, drop, and rename collections:
+
+```rust
+let mut tx = db.begin()?;
+
+// Create collection
+tx.create_collection("posts")?;
+
+// Rename collection
+tx.rename_collection("posts", "articles")?;
+
+// Drop collection (deletes all documents)
+tx.drop_collection("articles")?;
+
+tx.commit()?;
+```
+
+These operations are also atomic and isolated.
+
+## Read-only mode
+
+Open a database in read-only mode for safe concurrent access without locks:
+
+```rust
+let opts = DatabaseOptions {
+    read_only: true,
+    ..Default::default()
+};
+let db = Database::open_with_options("mydb.db", opts)?;
+
+let tx = db.begin()?;
+// Can read, but commit() will fail
+```
+
+Read-only mode uses **shared file locks**, allowing multiple processes to read the same database concurrently.
+
+## Performance tips
+
+### Bulk operations
+
+Insert multiple documents in one transaction:
+
+```rust
+let mut tx = db.begin()?;
+let mut users = tx.collection("users")?;
+
+let documents = vec![
+    json!({"name": "Alice"}),
+    json!({"name": "Bob"}),
+    json!({"name": "Charlie"}),
+];
+
+users.insert_many(documents)?;
+tx.commit()?;  // One fsync for all inserts
+```
+
+Benchmark (README.md:80): **19,150 docs/sec** with 1000 docs per transaction.
+
+### Long-running transactions
+
+Avoid keeping transactions open for long periods:
+
+- Blocks garbage collection of old MVCC versions
+- Increases memory usage for write buffers
+- Higher chance of conflicts for write transactions
+
+**Best practice:** Keep transactions short and focused.
+
+### Automatic checkpointing
+
+The WAL is automatically checkpointed when it reaches a threshold:
+
+```rust
+db.set_auto_checkpoint_threshold(1000);  // Checkpoint after 1000 WAL frames
+```
+
+Checkpointing runs in a background thread to avoid blocking commits (src/core/database.rs:854).
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="MVCC" icon="layer-group" href="/concepts/mvcc">
+    Learn how snapshot isolation is implemented
+  </Card>
+  <Card title="Storage Engine" icon="database" href="/concepts/storage-engine">
+    Understand the B-tree and copy-on-write mechanics
+  </Card>
+</CardGroup>

@@ -1,0 +1,640 @@
+---
+title: JavaScript SDK
+description: Using jasonisnthappy in Node.js applications
+---
+
+## Installation
+
+Install via npm:
+
+```bash
+npm install jasonisnthappy
+```
+
+The package includes pre-built native bindings for all supported platforms. The correct binary is automatically loaded for your platform.
+
+## Quick start
+
+```javascript
+const { Database } = require('jasonisnthappy');
+
+// Open database
+const db = Database.open('./my_database.db');
+
+try {
+  // Begin transaction
+  const tx = db.beginTransaction();
+
+  try {
+    // Insert document
+    const id = tx.insert('users', {
+      name: 'Alice',
+      age: 30,
+      email: 'alice@example.com'
+    });
+    console.log(`Inserted document with ID: ${id}`);
+
+    // Find by ID
+    const user = tx.findById('users', id);
+    console.log('Found:', user);
+
+    // Update
+    tx.updateById('users', id, { age: 31 });
+
+    // Find all
+    const allUsers = tx.findAll('users');
+    console.log('All users:', allUsers);
+
+    // Commit transaction
+    tx.commit();
+  } catch (error) {
+    // Rollback on error
+    tx.rollback();
+    throw error;
+  }
+} finally {
+  db.close();
+}
+```
+
+## TypeScript support
+
+The package includes full TypeScript type definitions:
+
+```typescript
+import { Database, Collection, Transaction, Document } from 'jasonisnthappy';
+
+interface User extends Document {
+  name: string;
+  age: number;
+  email: string;
+}
+
+const db = Database.open('./my_database.db');
+const users = db.getCollection<User>('users');
+
+const id = users.insert({
+  name: 'Alice',
+  age: 30,
+  email: 'alice@example.com'
+});
+
+const user: User | null = users.findById(id);
+if (user) {
+  console.log(`${user.name} is ${user.age} years old`);
+}
+```
+
+## API reference
+
+### Database
+
+#### Opening databases
+
+```typescript
+static open(path: string): Database
+static openWithOptions(path: string, options: DatabaseOptions): Database
+static defaultDatabaseOptions(): DatabaseOptions
+```
+
+<CodeGroup>
+```javascript Simple open
+const { Database } = require('jasonisnthappy');
+
+const db = Database.open('./my_database.db');
+try {
+  // Use database
+} finally {
+  db.close();
+}
+```
+
+```javascript With options
+const opts = Database.defaultDatabaseOptions();
+opts.cacheSize = 1024 * 1024 * 100; // 100MB cache
+opts.readOnly = false;
+
+const db = Database.openWithOptions('./my_database.db', opts);
+```
+
+```typescript TypeScript
+import { Database, DatabaseOptions } from 'jasonisnthappy';
+
+const opts: DatabaseOptions = {
+  cacheSize: 1024 * 1024 * 100,
+  autoCheckpointThreshold: 1000,
+  readOnly: false,
+  maxBulkOperations: 10000,
+  maxDocumentSize: 1024 * 1024,
+  maxRequestBodySize: 10 * 1024 * 1024
+};
+
+const db = Database.openWithOptions('./my_database.db', opts);
+```
+</CodeGroup>
+
+#### Configuration
+
+```typescript
+defaultTransactionConfig(): TransactionConfig
+setTransactionConfig(config: TransactionConfig): void
+getTransactionConfig(): TransactionConfig
+setAutoCheckpointThreshold(threshold: number): void
+```
+
+#### Database info
+
+```typescript
+getPath(): string
+isReadOnly(): boolean
+maxBulkOperations(): number
+maxDocumentSize(): number
+maxRequestBodySize(): number
+
+listCollections(): string[]
+collectionStats(collectionName: string): CollectionInfo
+databaseInfo(): DatabaseInfo
+```
+
+### Transaction
+
+#### Creating transactions
+
+```typescript
+beginTransaction(): Transaction
+```
+
+<Tabs>
+  <Tab title="JavaScript">
+    ```javascript
+    const tx = db.beginTransaction();
+    try {
+      const id = tx.insert('users', { name: 'Alice', age: 30 });
+      tx.commit();
+    } catch (error) {
+      tx.rollback();
+      throw error;
+    }
+    ```
+  </Tab>
+  
+  <Tab title="TypeScript">
+    ```typescript
+    const tx: Transaction = db.beginTransaction();
+    try {
+      const id = tx.insert<User>('users', {
+        name: 'Alice',
+        age: 30,
+        email: 'alice@example.com'
+      });
+      tx.commit();
+    } catch (error) {
+      tx.rollback();
+      throw error;
+    }
+    ```
+  </Tab>
+</Tabs>
+
+#### CRUD operations
+
+```typescript
+insert<T extends Document>(collectionName: string, doc: Omit<T, '_id'>): string
+findById<T extends Document>(collectionName: string, id: string): T | null
+updateById<T extends Document>(collectionName: string, id: string, updates: Partial<T>): void
+deleteById(collectionName: string, id: string): void
+findAll<T extends Document>(collectionName: string): T[]
+count(collectionName: string): number
+```
+
+<Steps>
+  <Step title="Insert a document">
+    ```javascript
+    const id = tx.insert('users', {
+      name: 'Alice',
+      age: 30,
+      email: 'alice@example.com'
+    });
+    ```
+  </Step>
+  
+  <Step title="Find by ID">
+    ```javascript
+    const user = tx.findById('users', id);
+    if (user) {
+      console.log(`Name: ${user.name}, Age: ${user.age}`);
+    }
+    ```
+  </Step>
+  
+  <Step title="Update the document">
+    ```javascript
+    tx.updateById('users', id, { age: 31 });
+    ```
+  </Step>
+  
+  <Step title="Commit the transaction">
+    ```javascript
+    tx.commit();
+    ```
+  </Step>
+</Steps>
+
+#### Transaction control
+
+```typescript
+isActive(): boolean
+commit(): void
+rollback(): void
+```
+
+<Warning>
+  Always commit or rollback transactions. Unfinished transactions can lock database resources.
+</Warning>
+
+#### Collection management
+
+```typescript
+createCollection(collectionName: string): void
+dropCollection(collectionName: string): void
+renameCollection(oldName: string, newName: string): void
+```
+
+### Collection
+
+For non-transactional operations with auto-commit:
+
+```typescript
+getCollection<T extends Document>(name: string): Collection<T>
+```
+
+#### Basic CRUD
+
+```typescript
+name(): string
+insert(doc: Omit<T, '_id'>): string
+findById(id: string): T | null
+updateById(id: string, updates: Partial<T>): void
+deleteById(id: string): void
+findAll(): T[]
+count(): number
+```
+
+#### Querying
+
+```typescript
+find(filter: string): T[]
+findOne(filter: string): T | null
+update(filter: string, updates: Partial<T>): number
+updateOne(filter: string, updates: Partial<T>): boolean
+delete(filter: string): number
+deleteOne(filter: string): boolean
+```
+
+<CodeGroup>
+```javascript Find many
+const adults = users.find('age >= 18');
+for (const user of adults) {
+  console.log(`${user.name} is ${user.age} years old`);
+}
+```
+
+```javascript Find one
+const user = users.findOne("email == 'alice@example.com'");
+if (user) {
+  console.log('Found:', user);
+}
+```
+
+```javascript Update many
+const count = users.update("city == 'NYC'", { city: 'New York' });
+console.log(`Updated ${count} documents`);
+```
+
+```typescript TypeScript with types
+interface User extends Document {
+  name: string;
+  age: number;
+  city: string;
+}
+
+const users = db.getCollection<User>('users');
+const adults: User[] = users.find('age >= 18');
+const count: number = users.update("city == 'NYC'", { city: 'New York' });
+```
+</CodeGroup>
+
+#### Upsert operations
+
+```typescript
+upsertById(id: string, doc: Omit<T, '_id'>): UpsertResult
+upsert(filter: string, doc: Omit<T, '_id'>): UpsertResult
+
+interface UpsertResult {
+  id: string
+  inserted: boolean  // true if inserted, false if updated
+}
+```
+
+#### Bulk operations
+
+```typescript
+insertMany(docs: Omit<T, '_id'>[]): string[]
+bulkWrite(operations: BulkOperation<Omit<T, '_id'>>[], ordered?: boolean): BulkWriteResult
+```
+
+Bulk write example:
+
+```javascript
+const result = users.bulkWrite([
+  { op: 'insert', doc: { name: 'Alice', age: 30 } },
+  { op: 'update_one', filter: "name == 'Bob'", update: { age: 26 } },
+  { op: 'delete_many', filter: 'age < 18' }
+], true); // ordered execution
+
+console.log(`Inserted: ${result.inserted_count}`);
+console.log(`Updated: ${result.updated_count}`);
+console.log(`Deleted: ${result.deleted_count}`);
+```
+
+#### Advanced operations
+
+```typescript
+distinct<K extends keyof T>(field: K): T[K][]
+countDistinct(field: keyof T): number
+search(query: string): SearchResult[]
+countWithQuery(filter?: string): number
+
+interface SearchResult {
+  doc_id: string
+  score: number
+}
+```
+
+#### Query builder
+
+```typescript
+queryWithOptions(
+  filter?: string,
+  sortField?: keyof T & string,
+  sortAsc?: boolean,
+  limit?: number,
+  skip?: number,
+  projectFields?: (keyof T & string)[],
+  excludeFields?: (keyof T & string)[]
+): T[]
+
+queryCount(filter?: string, skip?: number, limit?: number): number
+queryFirst(filter?: string, sortField?: keyof T & string, sortAsc?: boolean): T | null
+```
+
+Example:
+
+```javascript
+const results = users.queryWithOptions(
+  'age >= 18',        // filter
+  'age',              // sort field
+  false,              // descending
+  10,                 // limit
+  0,                  // skip
+  ['name', 'age'],    // project only these fields
+  []                  // exclude fields
+);
+```
+
+#### Aggregation
+
+```typescript
+aggregate<R>(pipeline: AggregationStage[]): R[]
+
+interface AggregationStage {
+  match?: string
+  group_by?: string
+  count?: string
+  sum?: { field: string; output: string }
+  avg?: { field: string; output: string }
+  min?: { field: string; output: string }
+  max?: { field: string; output: string }
+  sort?: { field: string; asc?: boolean }
+  limit?: number
+  skip?: number
+  project?: string[]
+  exclude?: string[]
+}
+```
+
+Example:
+
+```javascript
+const pipeline = [
+  { match: 'age >= 18' },
+  { group_by: 'city' },
+  { count: 'population' },
+  { sort: { field: 'population', asc: false } },
+  { limit: 10 }
+];
+
+const results = users.aggregate(pipeline);
+console.log('Top 10 cities by adult population:', results);
+```
+
+### Indexing
+
+```typescript
+listIndexes(collectionName: string): IndexInfo[]
+createIndex(collectionName: string, indexName: string, field: string, unique: boolean): void
+createCompoundIndex(collectionName: string, indexName: string, fields: string[], unique: boolean): void
+createTextIndex(collectionName: string, indexName: string, field: string): void
+dropIndex(collectionName: string, indexName: string): void
+
+interface IndexInfo {
+  name: string
+  fields: string[]
+  unique: boolean
+  index_type: 'btree' | 'text'
+}
+```
+
+### Schema validation
+
+```typescript
+setSchema(collectionName: string, schema: Record<string, unknown>): void
+getSchema(collectionName: string): Record<string, unknown> | null
+removeSchema(collectionName: string): void
+```
+
+Example schema:
+
+```javascript
+const schema = {
+  type: 'object',
+  properties: {
+    name: { type: 'string' },
+    age: { type: 'number' },
+    email: { type: 'string' }
+  },
+  required: ['name', 'email']
+};
+
+db.setSchema('users', schema);
+```
+
+### Change streams
+
+```typescript
+watch(filter: string | undefined, callback: WatchCallback<T>): WatchHandle
+
+type WatchCallback<T> = (
+  operation: ChangeOperation,
+  docId: string,
+  document: T | null
+) => void
+
+type ChangeOperation = 'insert' | 'update' | 'delete'
+
+class WatchHandle {
+  stop(): void
+}
+```
+
+Example:
+
+```javascript
+const handle = users.watch('age >= 18', (operation, docId, document) => {
+  console.log(`${operation} on document ${docId}`);
+  if (document) {
+    console.log('Document:', document);
+  }
+});
+
+// Later, stop watching
+handle.stop();
+```
+
+### Maintenance
+
+```typescript
+checkpoint(): void
+backup(destPath: string): void
+static verifyBackup(backupPath: string): BackupInfo
+garbageCollect(): GarbageCollectResult
+metrics(): MetricsSnapshot
+frameCount(): number
+```
+
+### Web UI
+
+```typescript
+startWebUi(addr: string): WebServer
+
+class WebServer {
+  stop(): void
+}
+```
+
+Example:
+
+```javascript
+const server = db.startWebUi('127.0.0.1:8080');
+console.log('Web UI available at http://127.0.0.1:8080');
+
+// Later, stop the server
+server.stop();
+```
+
+## Complete example
+
+```javascript
+const { Database } = require('jasonisnthappy');
+
+function main() {
+  const db = Database.open('./my_app.db');
+  
+  try {
+    // Create an index for faster lookups
+    db.createIndex('users', 'idx_email', 'email', true);
+    
+    // Set a schema for validation
+    db.setSchema('users', {
+      type: 'object',
+      properties: {
+        name: { type: 'string' },
+        age: { type: 'number' },
+        email: { type: 'string' }
+      },
+      required: ['name', 'email']
+    });
+    
+    // Use collections for auto-commit operations
+    const users = db.getCollection('users');
+    
+    // Insert multiple documents
+    const ids = users.insertMany([
+      { name: 'Alice', age: 30, email: 'alice@example.com' },
+      { name: 'Bob', age: 25, email: 'bob@example.com' },
+      { name: 'Charlie', age: 35, email: 'charlie@example.com' }
+    ]);
+    console.log(`Inserted ${ids.length} documents`);
+    
+    // Query with filter
+    const adults = users.find('age >= 30');
+    console.log(`Found ${adults.length} adults`);
+    
+    // Update with filter
+    const count = users.update("name == 'Alice'", { age: 31 });
+    console.log(`Updated ${count} documents`);
+    
+    // Get distinct values
+    const ages = users.distinct('age');
+    console.log('Distinct ages:', ages);
+    
+    // Run aggregation
+    const results = users.aggregate([
+      { match: 'age >= 25' },
+      { group_by: 'age' },
+      { count: 'total' },
+      { sort: { field: 'total', asc: false } }
+    ]);
+    console.log('Aggregation results:', results);
+    
+    // Get database info
+    const info = db.databaseInfo();
+    console.log(`Total documents: ${info.total_documents}`);
+    console.log(`Collections: ${info.collections.length}`);
+    
+  } finally {
+    db.close();
+  }
+}
+
+main();
+```
+
+## Error handling
+
+All operations throw errors on failure:
+
+```javascript
+try {
+  const db = Database.open('./my_database.db');
+  const tx = db.beginTransaction();
+  
+  const id = tx.insert('users', { name: 'Alice' });
+  tx.commit();
+  
+  db.close();
+} catch (error) {
+  console.error('Database error:', error.message);
+}
+```
+
+## Platform support
+
+Pre-built native bindings are provided for:
+- macOS (Intel and Apple Silicon)
+- Linux (x86_64, ARM64)
+- Windows (x86_64)
+
+<Note>
+  The package automatically loads the correct native binary for your platform. No additional build steps are required.
+</Note>

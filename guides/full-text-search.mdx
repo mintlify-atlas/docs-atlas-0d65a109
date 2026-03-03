@@ -1,0 +1,523 @@
+---
+title: Full-text search
+description: Implement powerful text search with TF-IDF ranking and Unicode tokenization
+---
+
+Jasonisnthappy includes a built-in full-text search engine that uses TF-IDF (Term Frequency-Inverse Document Frequency) scoring to rank search results by relevance.
+
+## Overview
+
+Full-text search allows you to:
+
+- Search across multiple text fields
+- Rank results by relevance score
+- Handle Unicode text correctly
+- Filter common words automatically
+- Scale to large document collections
+
+<Note>
+Text search requires a **text index** to be created first. Regular indexes don't support full-text search.
+</Note>
+
+## Creating a text index
+
+### Single field index
+
+Create a text index on one field.
+
+```rust
+use jasonisnthappy::Database;
+use serde_json::json;
+
+let db = Database::open("my.db")?;
+
+// Create text index on "content" field
+db.create_text_index(
+    "posts",           // collection name
+    "content_idx",     // index name
+    &["content"]       // fields to index
+)?;
+
+println!("Text index created!");
+```
+
+### Multi-field index
+
+Search across multiple fields simultaneously.
+
+```rust
+// Index both title and body for blog posts
+db.create_text_index(
+    "posts",
+    "search_idx",
+    &["title", "body"]  // Multiple fields
+)?;
+
+// Index product name and description
+db.create_text_index(
+    "products",
+    "product_search",
+    &["name", "description", "tags"]
+)?;
+```
+
+<Tip>
+Include all fields you want to search in a single text index. Multiple text indexes on the same collection are supported but each search uses only one index.
+</Tip>
+
+## Searching
+
+### Basic search
+
+Search for documents and get results sorted by relevance.
+
+```rust
+let posts = db.collection("posts");
+
+// Insert some documents
+posts.insert(json!({
+    "title": "Introduction to Rust",
+    "body": "Rust is a systems programming language focused on safety and performance."
+}))?;
+
+posts.insert(json!({
+    "title": "Building a Database in Rust",
+    "body": "Learn how to build a high-performance embedded database using Rust."
+}))?;
+
+// Search (returns results ranked by relevance)
+let results = posts.search("rust database")?;
+
+for result in results {
+    println!("Doc ID: {} (score: {:.2})", result.doc_id, result.score);
+    
+    // Fetch the full document
+    let doc = posts.find_by_id(&result.doc_id)?;
+    println!("Title: {}", doc["title"]);
+}
+```
+
+### Understanding relevance scores
+
+Scores represent how well a document matches the query:
+
+- **Higher scores** = more relevant
+- Scores are based on TF-IDF algorithm
+- Documents are automatically sorted by score (highest first)
+
+```rust
+let results = posts.search("rust programming")?;
+
+for result in results {
+    if result.score > 1.0 {
+        println!("Highly relevant: {}", result.doc_id);
+    } else if result.score > 0.5 {
+        println!("Moderately relevant: {}", result.doc_id);
+    } else {
+        println!("Low relevance: {}", result.doc_id);
+    }
+}
+```
+
+## How it works
+
+### Tokenization
+
+Text is broken into tokens (words) using Unicode-aware word boundaries.
+
+```rust
+// Text: "Hello, World! Let's build a database."
+// Tokens: ["hello", "world", "let's", "build", "database"]
+
+// Unicode support
+// Text: "Rust is 🔥 amazing!"
+// Tokens: ["rust", "is", "amazing"]
+```
+
+Features:
+- Case-insensitive (converted to lowercase)
+- Unicode word boundaries
+- Filters single-character tokens
+- Preserves contractions ("let's", "don't")
+
+### TF-IDF scoring
+
+Relevance is calculated using Term Frequency-Inverse Document Frequency:
+
+<Steps>
+
+### Term Frequency (TF)
+
+How often does a term appear in the document?
+
+```
+TF = (count of term in document) / (total terms in document)
+```
+
+### Inverse Document Frequency (IDF)
+
+How rare is the term across all documents?
+
+```
+IDF = ln(total documents / documents containing term)
+```
+
+### Final score
+
+```
+Score = TF × IDF
+```
+
+Common words ("the", "is") get low IDF → low score
+Rare, specific words get high IDF → high score
+
+</Steps>
+
+## Advanced usage
+
+### Multi-word queries
+
+Search for multiple terms - documents matching more terms score higher.
+
+```rust
+// Search for "rust database performance"
+let results = posts.search("rust database performance")?;
+
+// Documents containing all three terms rank highest
+// Documents with 2 terms rank middle
+// Documents with 1 term rank lowest
+```
+
+### Search and filter
+
+Combine full-text search with regular queries.
+
+```rust
+// Search, then filter results
+let results = posts.search("rust programming")?;
+
+for result in results {
+    let doc = posts.find_by_id(&result.doc_id)?;
+    
+    // Filter by additional criteria
+    if doc["published"].as_bool().unwrap_or(false) {
+        println!("Published: {} (score: {:.2})", doc["title"], result.score);
+    }
+}
+```
+
+<Note>
+Currently, you cannot combine search with query filters in a single operation. Fetch results and filter in your application.
+</Note>
+
+### Paginating search results
+
+```rust
+let results = posts.search("rust database")?;
+
+let page_size = 10;
+let page = 2;
+let start = page * page_size;
+let end = start + page_size;
+
+for result in results.iter().skip(start).take(page_size) {
+    let doc = posts.find_by_id(&result.doc_id)?;
+    println!("{}: {}", result.doc_id, doc["title"]);
+}
+```
+
+## Real-world examples
+
+### Blog search
+
+```rust
+use jasonisnthappy::Database;
+use serde_json::json;
+
+let db = Database::open("blog.db")?;
+
+// Create text index on title and content
+db.create_text_index("posts", "search_idx", &["title", "body"])?;
+
+let posts = db.collection("posts");
+
+// Insert blog posts
+posts.insert(json!({
+    "title": "Getting Started with Rust",
+    "body": "Rust is a modern systems programming language...",
+    "author": "Alice",
+    "published": true
+}))?;
+
+posts.insert(json!({
+    "title": "Advanced Rust Patterns",
+    "body": "Explore advanced Rust programming patterns...",
+    "author": "Bob",
+    "published": true
+}))?;
+
+// Search published posts
+let results = posts.search("rust programming")?;
+
+for result in results.iter().take(5) {
+    let post = posts.find_by_id(&result.doc_id)?;
+    
+    if post["published"].as_bool().unwrap_or(false) {
+        println!("📝 {} (by {})", post["title"], post["author"]);
+        println!("   Relevance: {:.2}", result.score);
+    }
+}
+```
+
+### Product search
+
+```rust
+db.create_text_index(
+    "products",
+    "product_search",
+    &["name", "description", "category"]
+)?;
+
+let products = db.collection("products");
+
+products.insert(json!({
+    "name": "Rust Programming Book",
+    "description": "Learn Rust programming from beginner to advanced",
+    "category": "Books",
+    "price": 49.99,
+    "in_stock": true
+}))?;
+
+// Search products
+let results = products.search("rust programming book")?;
+
+for result in results {
+    let product = products.find_by_id(&result.doc_id)?;
+    
+    // Show in-stock products first
+    if product["in_stock"].as_bool().unwrap_or(false) {
+        println!("✅ {} - ${}",
+            product["name"],
+            product["price"]
+        );
+        println!("   Match score: {:.2}", result.score);
+    }
+}
+```
+
+### Documentation search
+
+```rust
+db.create_text_index(
+    "docs",
+    "docs_search",
+    &["title", "content", "keywords"]
+)?;
+
+let docs = db.collection("docs");
+
+docs.insert(json!({
+    "title": "Database Transactions",
+    "content": "Learn about ACID transactions and MVCC...",
+    "keywords": "transactions, MVCC, ACID, concurrency",
+    "section": "Core Concepts"
+}))?;
+
+// User searches documentation
+let query = "how to use transactions";
+let results = docs.search(query)?;
+
+// Show top 3 results
+for result in results.iter().take(3) {
+    let doc = docs.find_by_id(&result.doc_id)?;
+    println!("\n📖 {}", doc["title"]);
+    println!("   Section: {}", doc["section"]);
+    println!("   Relevance: {:.2}", result.score);
+}
+```
+
+### Support ticket search
+
+```rust
+db.create_text_index(
+    "tickets",
+    "ticket_search",
+    &["subject", "description", "resolution"]
+)?;
+
+let tickets = db.collection("tickets");
+
+// Find similar issues
+let results = tickets.search("database connection timeout")?;
+
+for result in results.iter().take(5) {
+    let ticket = tickets.find_by_id(&result.doc_id)?;
+    
+    println!("Ticket #{}: {}",
+        ticket["id"],
+        ticket["subject"]
+    );
+    
+    if ticket["status"].as_str() == Some("resolved") {
+        println!("   ✅ Resolved: {}", ticket["resolution"]);
+    }
+    
+    println!("   Similarity: {:.2}", result.score);
+}
+```
+
+## Performance optimization
+
+### Index creation
+
+<Tip>
+**Create indexes on existing data:**
+
+Text indexes are built from existing documents when created. For large collections, this can take time.
+
+```rust
+// For 10,000 documents: ~1-2 seconds
+// For 100,000 documents: ~10-20 seconds
+db.create_text_index("posts", "search_idx", &["title", "body"])?;
+```
+</Tip>
+
+### Search performance
+
+<Tip>
+**Search is fast, even on large collections:**
+
+- Uses B-tree for O(log n) term lookup
+- Ranks results in memory (fast for < 10,000 results)
+- Consider caching search results for common queries
+</Tip>
+
+### Memory usage
+
+<Warning>
+Text indexes store:
+- Tokenized terms (lowercase)
+- Document IDs containing each term
+- Term frequencies
+
+For very large collections with many unique terms, indexes can be substantial.
+</Warning>
+
+## Limitations
+
+<Warning>
+**Current limitations:**
+- No phrase search ("exact phrase" matching)
+- No wildcard search ("rust*", "*base")
+- No fuzzy matching (typo tolerance)
+- No stop word removal (common words like "the", "is")
+- All terms are AND'ed (documents must contain at least one term)
+</Warning>
+
+## Best practices
+
+<Tip>
+**Index the fields you search:**
+
+```rust
+// Good: index all searchable fields
+db.create_text_index("products", "search", &["name", "description"])?;
+
+// Bad: forgetting important fields
+db.create_text_index("products", "search", &["name"])?;  // Missing description
+```
+</Tip>
+
+<Tip>
+**Keep indexed text fields focused:**
+
+```rust
+// Good: relevant text content
+db.create_text_index("posts", "search", &["title", "body"])?;
+
+// Avoid: including non-text or irrelevant fields
+db.create_text_index("posts", "search", &["title", "body", "id", "metadata"])?;
+```
+</Tip>
+
+<Tip>
+**Use descriptive index names:**
+
+```rust
+// Good
+db.create_text_index("products", "product_search_idx", &["name", "description"])?;
+db.create_text_index("posts", "blog_search_idx", &["title", "content"])?;
+
+// Bad
+db.create_text_index("products", "idx1", &["name"])?;
+```
+</Tip>
+
+## Tokenization details
+
+### What gets indexed
+
+```rust
+// Input text
+let text = "Hello, World! Let's build a Rust database (v1.0).";
+
+// Tokens extracted (lowercase, Unicode words, length > 1)
+// ["hello", "world", "let's", "build", "rust", "database"]
+```
+
+### Edge cases
+
+<CodeGroup>
+```rust Numbers
+// Numbers are preserved if > 1 character
+"Rust 2021 Edition" → ["rust", "2021", "edition"]
+"Version 1.0" → ["version", "10"]  // "1" and "0" separate
+```
+
+```rust Special characters
+// Special characters separate tokens
+"rust-lang" → ["rust", "lang"]
+"user@example.com" → ["user", "example", "com"]
+```
+
+```rust Unicode
+// Unicode word boundaries respected
+"Café résumé" → ["café", "résumé"]
+"Hello 世界" → ["hello", "世界"]
+```
+</CodeGroup>
+
+## Comparison with regular indexes
+
+| Feature | Text Index | Regular Index |
+|---------|-----------|---------------|
+| Exact match | ❌ No | ✅ Yes |
+| Partial match | ✅ Yes (word-level) | ❌ No |
+| Relevance ranking | ✅ Yes | ❌ No |
+| Multiple fields | ✅ Yes | ✅ Yes (compound) |
+| Prefix search | ❌ No | ✅ Yes (with range) |
+| Case-sensitive | ❌ No | ✅ Yes |
+| Use case | Search | Exact lookups |
+
+<Tip>
+Use both types together:
+- Text index for search
+- Regular index for exact lookups (ID, email, etc.)
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Indexes" icon="bolt" href="/guides/indexes">
+    Create regular indexes for exact matches
+  </Card>
+  <Card title="Querying" icon="magnifying-glass" href="/guides/querying">
+    Filter search results with queries
+  </Card>
+  <Card title="Performance" icon="gauge-high" href="/guides/performance">
+    Optimize search performance
+  </Card>
+  <Card title="CRUD operations" icon="database" href="/guides/crud-operations">
+    Insert searchable documents
+  </Card>
+</CardGroup>

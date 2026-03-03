@@ -1,80 +1,284 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get up and running with jasonisnthappy in 5 minutes
 ---
 
-## Get started in three steps
+This quickstart guide will help you create your first jasonisnthappy database and perform basic CRUD operations. We'll use Rust for this example, but jasonisnthappy works with Go, Python, and JavaScript too.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+- Rust 1.70 or later (for Rust usage)
+- Basic familiarity with JSON documents
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+<Note>
+  If you're using Go, Python, or JavaScript, see the [Installation](/installation) guide for language-specific setup instructions.
+</Note>
 
-### Step 2: Deploy your changes
+## Installation
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+Add jasonisnthappy to your `Cargo.toml`:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+```toml Cargo.toml
+[dependencies]
+jasonisnthappy = "0.1.1"
+serde_json = "1.0"
+```
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+## Create your first database
 
-### Step 3: Go live
+Here's a complete example that demonstrates the core features of jasonisnthappy:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+<Steps>
+  <Step title="Open a database">
+    Create or open a database file. If the file doesn't exist, jasonisnthappy will create it.
+
+    ```rust examples/collection_crud.rs
+    use jasonisnthappy::core::database::Database;
+    use serde_json::json;
+    use std::sync::Arc;
+
+    let db = Arc::new(Database::open("crud_example.db")?);
+    let users = db.collection("users");
+    ```
+
+    <Info>
+      The database file stores all your data. Additional files like `.lock` and `-wal` (write-ahead log) are created automatically for concurrency control and durability.
+    </Info>
+  </Step>
+
+  <Step title="Insert documents">
+    Add JSON documents to a collection. Collections are created automatically when you first use them.
+
+    ```rust examples/collection_crud.rs
+    let alice = json!({"name": "Alice", "age": 30, "city": "New York"});
+    let bob = json!({"name": "Bob", "age": 25, "city": "San Francisco"});
+    let charlie = json!({"name": "Charlie", "age": 35, "city": "Seattle"});
+
+    let id1 = users.insert(alice)?;
+    let id2 = users.insert(bob)?;
+    let id3 = users.insert(charlie)?;
+
+    println!("Inserted Alice: {}", id1);
+    println!("Inserted Bob: {}", id2);
+    println!("Inserted Charlie: {}", id3);
+    ```
+
+    Each document is automatically assigned a unique ID that's returned from the `insert()` operation.
+  </Step>
+
+  <Step title="Query documents">
+    Retrieve documents by ID or count all documents in a collection.
+
+    ```rust examples/collection_crud.rs
+    // Count total documents
+    let count = users.count()?;
+    println!("Total documents: {}", count);
+
+    // Find by ID
+    let found = users.find_by_id(&id1)?;
+    println!("Found: {}", serde_json::to_string_pretty(&found)?);
+
+    // Find all documents
+    let all_users = users.find_all()?;
+    for user in &all_users {
+        println!("- {}", user["name"]);
+    }
+    ```
+  </Step>
+
+  <Step title="Update documents">
+    Modify existing documents using their ID.
+
+    ```rust examples/collection_crud.rs
+    // Update Alice's age
+    users.update_by_id(&id1, json!({"age": 31}))?;
+    let updated = users.find_by_id(&id1)?;
+    println!("Updated age: {}", updated["age"]);
+    ```
+
+    Updates are partial by default - only the fields you specify are changed.
+  </Step>
+
+  <Step title="Delete documents">
+    Remove documents from a collection.
+
+    ```rust examples/collection_crud.rs
+    // Delete Bob
+    users.delete_by_id(&id2)?;
+    let count_after_delete = users.count()?;
+    println!("Documents after delete: {}", count_after_delete);
+    ```
+  </Step>
+
+  <Step title="Close the database">
+    Always close the database when you're done to ensure all data is flushed to disk.
+
+    ```rust examples/collection_crud.rs
+    db.close()?;
+    ```
+  </Step>
+</Steps>
+
+## Working with transactions
+
+For operations that need atomicity, use explicit transactions. This example shows how to perform multiple operations that either all succeed or all fail together:
+
+```rust examples/basic_usage.rs
+use jasonisnthappy::core::database::Database;
+
+let db = Database::open("example.db")?;
+
+// Begin a transaction
+let mut tx = db.begin()?;
+
+// Write documents within the transaction
+tx.write_document("users", "user1", 100)?;
+tx.write_document("users", "user2", 101)?;
+
+// Commit to make changes permanent
+tx.commit()?;
+
+db.close()?;
+```
+
+<Warning>
+  If you don't call `commit()`, the transaction will be automatically rolled back when it goes out of scope, discarding all changes.
+</Warning>
+
+## Understanding MVCC
+
+One of jasonisnthappy's key features is MVCC (Multi-Version Concurrency Control), which allows:
+
+- **Concurrent reads**: Multiple readers can access data simultaneously without blocking
+- **Non-blocking writes**: Writers don't block readers and vice versa
+- **Snapshot isolation**: Each transaction sees a consistent snapshot of the database
+
+This happens automatically - you don't need to manage locks or worry about read/write conflicts in most cases.
+
+## Explore the Web UI
+
+jasonisnthappy includes a built-in web interface for exploring your data:
+
+```rust examples/web_ui_demo.rs
+use jasonisnthappy::Database;
+
+let db = Database::open("web_demo.db")?;
+
+// Start the web UI on port 8080
+let _web_server = db.start_web_ui("127.0.0.1:8080")?;
+
+println!("Web UI running at http://127.0.0.1:8080");
+
+// Keep server alive
+std::thread::park();
+```
+
+The Web UI provides:
+- Collection browser with document viewer
+- Real-time metrics dashboard
+- Search and pagination
+- Auto-refresh every 5 seconds
+
+<Tip>
+  The Web UI is perfect for development and debugging. You can inspect your data, test queries, and monitor database performance in real-time.
+</Tip>
 
 ## Next steps
 
-Now that you have your docs running, explore these key features:
+Now that you've created your first database, explore these topics:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Installation guide" icon="download" href="/installation">
+    Install jasonisnthappy for Go, Python, or JavaScript
+  </Card>
+  <Card title="Core concepts" icon="book" href="/concepts/architecture">
+    Learn about transactions, collections, and MVCC in depth
+  </Card>
+  <Card title="Querying data" icon="magnifying-glass" href="/guides/querying">
+    Master the query language and aggregation pipeline
+  </Card>
+  <Card title="Indexing" icon="database" href="/guides/indexes">
+    Optimize performance with B-tree and full-text indexes
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Complete example
+
+Here's the full working example from the source repository:
+
+```rust examples/collection_crud.rs
+use jasonisnthappy::core::database::Database;
+use serde_json::json;
+use std::sync::Arc;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("=== Collection CRUD Example ==="\n);
+
+    let _ = std::fs::remove_file("crud_example.db");
+    let _ = std::fs::remove_file("crud_example.db.lock");
+    let _ = std::fs::remove_file("crud_example.db-wal");
+
+    let db = Arc::new(Database::open("crud_example.db")?);
+    let users = db.collection("users");
+
+    println!("1. Inserting documents...");
+    let alice = json!({"name": "Alice", "age": 30, "city": "New York"});
+    let bob = json!({"name": "Bob", "age": 25, "city": "San Francisco"});
+    let charlie = json!({"name": "Charlie", "age": 35, "city": "Seattle"});
+
+    let id1 = users.insert(alice)?;
+    let id2 = users.insert(bob)?;
+    let id3 = users.insert(charlie)?;
+
+    println!("   Inserted Alice: {}", id1);
+    println!("   Inserted Bob: {}", id2);
+    println!("   Inserted Charlie: {}", id3);
+
+    println!("\n2. Counting documents...");
+    let count = users.count()?;
+    println!("   Total documents: {}", count);
+
+    println!("\n3. Finding document by ID...");
+    let found = users.find_by_id(&id1)?;
+    println!("   Found: {}", serde_json::to_string_pretty(&found)?);
+
+    println!("\n4. Finding all documents...");
+    let all_users = users.find_all()?;
+    for user in &all_users {
+        println!("   - {}", user["name"]);
+    }
+
+    println!("\n5. Updating Alice's age...");
+    users.update_by_id(&id1, json!({"age": 31}))?;
+    let updated = users.find_by_id(&id1)?;
+    println!("   Updated age: {}", updated["age"]);
+
+    println!("\n6. Deleting Bob...");
+    users.delete_by_id(&id2)?;
+    let count_after_delete = users.count()?;
+    println!("   Documents after delete: {}", count_after_delete);
+
+    println!("\n7. Remaining documents:");
+    let remaining = users.find_all()?;
+    for user in &remaining {
+        println!("   - {} (age {})", user["name"], user["age"]);
+    }
+
+    db.close()?;
+
+    println!("\n8. Cleaning up...");
+    std::fs::remove_file("crud_example.db")?;
+    std::fs::remove_file("crud_example.db.lock")?;
+    std::fs::remove_file("crud_example.db-wal")?;
+
+    println!("\n=== Example Complete ===");
+
+    Ok(())
+}
+```
+
+Run this example with:
+
+```bash
+cargo run --example collection_crud
+```

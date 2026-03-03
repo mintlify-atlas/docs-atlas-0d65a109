@@ -1,0 +1,561 @@
+---
+title: Go SDK
+description: Using jasonisnthappy in Go applications
+---
+
+## Installation
+
+The Go bindings use CGO to link against a pre-built static library. Your final binary is **fully self-contained** with no external dependencies.
+
+<Steps>
+  <Step title="Get the package">
+    ```bash
+    go get github.com/sohzm/jasonisnthappy/bindings/go
+    ```
+  </Step>
+  
+  <Step title="Download the native library">
+    ```bash
+    go generate github.com/sohzm/jasonisnthappy/bindings/go
+    ```
+    
+    This downloads the pre-compiled static library (`.a` file) for your platform from GitHub releases and caches it in `lib/<platform>/`.
+  </Step>
+  
+  <Step title="Build your application">
+    ```bash
+    go build
+    ```
+    
+    CGO statically links the library into your binary. The result is a **single standalone executable** with zero runtime dependencies.
+  </Step>
+</Steps>
+
+<Note>
+  **Benefits:**
+  - Single self-contained binary
+  - No external library files needed
+  - Perfect for production deployment
+  - Works in Docker containers, cloud functions, etc.
+  - No Rust compiler needed
+</Note>
+
+## Quick start
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    db "github.com/sohzm/jasonisnthappy/bindings/go"
+)
+
+func main() {
+    // Open database
+    database, err := db.Open("./my_database.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer database.Close()
+
+    // Begin transaction
+    tx, err := database.BeginTransaction()
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer tx.Rollback() // Auto-rollback if not committed
+
+    // Insert document
+    doc := map[string]interface{}{
+        "name": "Alice",
+        "age":  30,
+        "email": "alice@example.com",
+    }
+    id, err := tx.Insert("users", doc)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Inserted document with ID: %s\n", id)
+
+    // Find by ID
+    var result map[string]interface{}
+    found, err := tx.FindByID("users", id, &result)
+    if err != nil {
+        log.Fatal(err)
+    }
+    if found {
+        fmt.Printf("Found: %+v\n", result)
+    }
+
+    // Update
+    doc["age"] = 31
+    err = tx.UpdateByID("users", id, doc)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Find all
+    var all []map[string]interface{}
+    err = tx.FindAll("users", &all)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("All users: %+v\n", all)
+
+    // Commit transaction
+    err = tx.Commit()
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+## API reference
+
+### Database
+
+#### Opening databases
+
+```go
+// Open a database at the specified path
+func Open(path string) (*Database, error)
+
+// Open with custom options
+func OpenWithOptions(path string, opts DatabaseOptions) (*Database, error)
+
+// Get default options
+func DefaultDatabaseOptions() DatabaseOptions
+```
+
+<CodeGroup>
+```go Simple open
+db, err := jasonisnthappy.Open("./my_database.db")
+if err != nil {
+    log.Fatal(err)
+}
+defer db.Close()
+```
+
+```go With options
+opts := jasonisnthappy.DefaultDatabaseOptions()
+opts.CacheSize = 1024 * 1024 * 100 // 100MB cache
+opts.ReadOnly = false
+
+db, err := jasonisnthappy.OpenWithOptions("./my_database.db", opts)
+if err != nil {
+    log.Fatal(err)
+}
+defer db.Close()
+```
+</CodeGroup>
+
+#### Configuration
+
+```go
+type DatabaseOptions struct {
+    CacheSize               uint
+    AutoCheckpointThreshold uint64
+    FilePermissions         uint32
+    ReadOnly                bool
+    MaxBulkOperations       uint
+    MaxDocumentSize         uint
+    MaxRequestBodySize      uint
+}
+
+type TransactionConfig struct {
+    MaxRetries          uint
+    RetryBackoffBaseMs  uint64
+    MaxRetryBackoffMs   uint64
+}
+
+// Set transaction retry configuration
+func (d *Database) SetTransactionConfig(config TransactionConfig) error
+
+// Get current configuration
+func (d *Database) GetTransactionConfig() (*TransactionConfig, error)
+
+// Set auto-checkpoint threshold
+func (d *Database) SetAutoCheckpointThreshold(threshold uint64) error
+```
+
+#### Database info
+
+```go
+// Get database file path
+func (d *Database) GetPath() (string, error)
+
+// Check if read-only
+func (d *Database) IsReadOnly() (bool, error)
+
+// Get limits
+func (d *Database) MaxBulkOperations() (uint, error)
+func (d *Database) MaxDocumentSize() (uint, error)
+func (d *Database) MaxRequestBodySize() (uint, error)
+
+// List all collections
+func (d *Database) ListCollections() ([]string, error)
+
+// Get collection statistics
+func (d *Database) CollectionStats(collectionName string) (map[string]interface{}, error)
+
+// Get comprehensive database info
+func (d *Database) DatabaseInfo() (map[string]interface{}, error)
+```
+
+### Transaction
+
+#### Creating transactions
+
+```go
+// Start a new transaction
+func (d *Database) BeginTransaction() (*Transaction, error)
+
+// Run transaction with automatic retries
+func (d *Database) RunTransaction(fn func(*Transaction) error) error
+```
+
+<Tabs>
+  <Tab title="Manual transaction">
+    ```go
+    tx, err := db.BeginTransaction()
+    if err != nil {
+        return err
+    }
+    defer tx.Rollback() // Safety net
+
+    id, err := tx.Insert("users", doc)
+    if err != nil {
+        return err
+    }
+
+    return tx.Commit()
+    ```
+  </Tab>
+  
+  <Tab title="Auto-retry transaction">
+    ```go
+    err := db.RunTransaction(func(tx *jasonisnthappy.Transaction) error {
+        id, err := tx.Insert("users", doc)
+        if err != nil {
+            return err
+        }
+        
+        // Transaction will auto-commit if no error
+        return nil
+    })
+    ```
+  </Tab>
+</Tabs>
+
+#### CRUD operations
+
+```go
+// Insert a document into a collection
+func (t *Transaction) Insert(collectionName string, doc interface{}) (string, error)
+
+// Find document by ID
+func (t *Transaction) FindByID(collectionName, id string, result interface{}) (bool, error)
+
+// Update document by ID
+func (t *Transaction) UpdateByID(collectionName, id string, doc interface{}) error
+
+// Delete document by ID
+func (t *Transaction) DeleteByID(collectionName, id string) error
+
+// Find all documents in a collection
+func (t *Transaction) FindAll(collectionName string, result interface{}) error
+
+// Count documents
+func (t *Transaction) Count(collectionName string) (int64, error)
+```
+
+#### Transaction control
+
+```go
+// Commit the transaction
+func (t *Transaction) Commit() error
+
+// Rollback the transaction (safe to call multiple times)
+func (t *Transaction) Rollback()
+
+// Check if transaction is still active
+func (t *Transaction) IsActive() bool
+```
+
+<Warning>
+  Always defer `tx.Rollback()` after creating a transaction. It's safe to call even after a successful commit.
+</Warning>
+
+#### Collection management
+
+```go
+// Create a new collection
+func (t *Transaction) CreateCollection(name string) error
+
+// Drop a collection
+func (t *Transaction) DropCollection(name string) error
+
+// Rename a collection
+func (t *Transaction) RenameCollection(oldName, newName string) error
+```
+
+### Collection
+
+For non-transactional operations with auto-commit:
+
+```go
+// Get a collection handle
+func (d *Database) GetCollection(name string) (*Collection, error)
+
+// Free the collection handle
+func (c *Collection) Free()
+
+// Get collection name
+func (c *Collection) Name() (string, error)
+```
+
+#### Basic CRUD
+
+```go
+// Insert a document
+func (c *Collection) Insert(doc interface{}) (string, error)
+
+// Find by ID
+func (c *Collection) FindByID(id string, result interface{}) (bool, error)
+
+// Update by ID
+func (c *Collection) UpdateByID(id string, updates interface{}) error
+
+// Delete by ID
+func (c *Collection) DeleteByID(id string) error
+
+// Find all documents
+func (c *Collection) FindAll(result interface{}) error
+
+// Count all documents
+func (c *Collection) Count() (int64, error)
+```
+
+#### Querying
+
+```go
+// Find documents matching a filter
+func (c *Collection) Find(filter string, result interface{}) error
+
+// Find first document matching a filter
+func (c *Collection) FindOne(filter string, result interface{}) (bool, error)
+
+// Update all documents matching a filter
+func (c *Collection) Update(filter string, update interface{}) (int64, error)
+
+// Update first document matching a filter
+func (c *Collection) UpdateOne(filter string, update interface{}) (bool, error)
+
+// Delete all documents matching a filter
+func (c *Collection) Delete(filter string) (int64, error)
+
+// Delete first document matching a filter
+func (c *Collection) DeleteOne(filter string) (bool, error)
+```
+
+<CodeGroup>
+```go Find many
+var adults []map[string]interface{}
+err := users.Find("age >= 18", &adults)
+if err != nil {
+    log.Fatal(err)
+}
+for _, user := range adults {
+    fmt.Printf("%s is %v years old\n", user["name"], user["age"])
+}
+```
+
+```go Find one
+var user map[string]interface{}
+found, err := users.FindOne("email == 'alice@example.com'", &user)
+if err != nil {
+    log.Fatal(err)
+}
+if found {
+    fmt.Printf("Found: %+v\n", user)
+}
+```
+
+```go Update many
+count, err := users.Update("city == 'NYC'", map[string]interface{}{
+    "city": "New York",
+})
+if err != nil {
+    log.Fatal(err)
+}
+fmt.Printf("Updated %d documents\n", count)
+```
+</CodeGroup>
+
+#### Bulk operations
+
+```go
+// Insert multiple documents
+func (c *Collection) InsertMany(docs []interface{}) ([]string, error)
+
+// Upsert by ID
+func (c *Collection) UpsertByID(id string, doc interface{}) (*UpsertResult, error)
+
+// Upsert with filter
+func (c *Collection) Upsert(filter string, doc interface{}) (*UpsertResult, error)
+```
+
+#### Advanced operations
+
+```go
+// Get distinct values for a field
+func (c *Collection) Distinct(field string) ([]interface{}, error)
+
+// Count distinct values
+func (c *Collection) CountDistinct(field string) (int64, error)
+
+// Full-text search
+func (c *Collection) Search(query string, result interface{}) error
+
+// Count with filter
+func (c *Collection) CountWithQuery(filter string) (int64, error)
+
+// Query with all options
+func (c *Collection) QueryWithOptions(
+    filter string,
+    sortField string,
+    sortAsc bool,
+    limit uint64,
+    skip uint64,
+    projectFields []string,
+    excludeFields []string,
+    result interface{},
+) error
+```
+
+### Indexing
+
+```go
+// Create a single-field index
+func (d *Database) CreateIndex(collectionName, indexName, field string, unique bool) error
+
+// Create a compound index
+func (d *Database) CreateCompoundIndex(collectionName, indexName string, fields []string, unique bool) error
+
+// Create a full-text search index
+func (d *Database) CreateTextIndex(collectionName, indexName, field string) error
+
+// Drop an index
+func (d *Database) DropIndex(collectionName, indexName string) error
+
+// List indexes
+func (d *Database) ListIndexes(collectionName string) ([]IndexInfo, error)
+
+type IndexInfo struct {
+    Name      string   `json:"name"`
+    Fields    []string `json:"fields"`
+    Unique    bool     `json:"unique"`
+    BTreeRoot uint64   `json:"btree_root"`
+}
+```
+
+### Schema validation
+
+```go
+// Set a JSON schema for validation
+func (d *Database) SetSchema(collectionName string, schema map[string]interface{}) error
+
+// Get the current schema
+func (d *Database) GetSchema(collectionName string) (map[string]interface{}, error)
+
+// Remove schema validation
+func (d *Database) RemoveSchema(collectionName string) error
+```
+
+### Maintenance
+
+```go
+// Perform a manual checkpoint
+func (d *Database) Checkpoint() error
+
+// Create a backup
+func (d *Database) Backup(destPath string) error
+
+// Verify a backup file
+func VerifyBackup(backupPath string) (map[string]interface{}, error)
+
+// Run garbage collection
+func (d *Database) GarbageCollect() (map[string]interface{}, error)
+
+// Get database metrics
+func (d *Database) Metrics() (map[string]interface{}, error)
+
+// Get frame count
+func (d *Database) FrameCount() (int64, error)
+```
+
+## Error handling
+
+```go
+type Error struct {
+    Code    int
+    Message string
+}
+
+func (e *Error) Error() string {
+    return e.Message
+}
+```
+
+All operations return Go's standard `error` interface:
+
+```go
+id, err := tx.Insert("users", doc)
+if err != nil {
+    if dbErr, ok := err.(*jasonisnthappy.Error); ok {
+        fmt.Printf("Database error [%d]: %s\n", dbErr.Code, dbErr.Message)
+    } else {
+        fmt.Printf("Error: %s\n", err)
+    }
+    return err
+}
+```
+
+## Requirements
+
+- **CGO enabled** (default on most systems)
+- Internet connection on first build (to download native library)
+- C compiler:
+  - **macOS**: `xcode-select --install`
+  - **Linux**: `apt install build-essential` or `yum install gcc`
+  - **Windows**: Install MinGW-w64
+
+## Platform support
+
+- macOS: ARM64 (Apple Silicon) and x64 (Intel)
+- Linux: ARM64 and x64
+- Windows: x64
+
+<Note>
+  Windows ARM64 is not currently supported.
+</Note>
+
+## Troubleshooting
+
+### Library download fails
+
+- Ensure you have internet connectivity
+- Check that the GitHub release exists with the required files
+- Verify your platform is supported
+
+### Build fails with CGO errors
+
+Make sure you have a C compiler installed for your platform.
+
+### Static linking fails
+
+- Make sure you ran `go generate` first
+- Check that the `.a` file exists: `ls bindings/go/lib/*/`
+- Verify you have system dependencies installed

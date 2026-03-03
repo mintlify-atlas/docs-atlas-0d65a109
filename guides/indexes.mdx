@@ -1,0 +1,449 @@
+---
+title: Indexes
+description: Speed up queries with single-field, compound, and unique indexes
+---
+
+Indexes dramatically improve query performance by allowing the database to quickly locate documents without scanning the entire collection.
+
+## Index basics
+
+### Why use indexes?
+
+Without an index, jasonisnthappy must scan every document to find matches. With an index:
+
+- Queries on indexed fields are **significantly faster**
+- Unique indexes prevent duplicate values
+- Compound indexes support multi-field queries
+- Range queries benefit from B-tree structure
+
+<Warning>
+Indexes speed up reads but add overhead to writes. Only index fields you query frequently.
+</Warning>
+
+## Creating indexes
+
+### Single-field index
+
+Create an index on a single field.
+
+```rust
+use jasonisnthappy::Database;
+
+let db = Database::open("my.db")?;
+
+// Create non-unique index on age field
+db.create_index(
+    "users",        // collection name
+    "age_idx",      // index name
+    "age",          // field name
+    false           // unique: false
+)?;
+
+println!("Index created successfully");
+```
+
+<Tip>
+Index names must be unique within a collection. Use descriptive names like `field_idx` or `field_unique_idx`.
+</Tip>
+
+### Unique index
+
+Enforce uniqueness constraints with unique indexes.
+
+```rust
+// Prevent duplicate emails
+db.create_index(
+    "users",
+    "email_unique_idx",
+    "email",
+    true  // unique: true
+)?;
+
+// Attempting to insert duplicate email will fail
+let users = db.collection("users");
+users.insert(json!({"email": "alice@example.com"}))?;  // OK
+users.insert(json!({"email": "alice@example.com"}))?;  // Error!
+```
+
+<Note>
+Unique indexes are built on existing data during creation. If duplicates exist, index creation fails.
+</Note>
+
+### Compound indexes
+
+Create indexes on multiple fields for multi-criteria queries.
+
+```rust
+// Index on city AND age (in that order)
+db.create_compound_index(
+    "users",
+    "city_age_idx",
+    &["city", "age"],  // field order matters!
+    false
+)?;
+```
+
+<Tabs>
+  <Tab title="Leftmost prefix rule">
+    Compound indexes follow the **leftmost prefix rule**:
+    
+    ```rust
+    // Index: ["city", "age"]
+    
+    // ✅ Uses index: queries on "city" alone
+    users.find("city is \"NYC\"")?;
+    
+    // ✅ Uses index: queries on "city" and "age"
+    users.find("city is \"NYC\" and age > 25")?;
+    
+    // ❌ Cannot use index: queries on "age" alone
+    users.find("age > 25")?;
+    ```
+    
+    The index can only be used if the query includes the leftmost field(s).
+  </Tab>
+  <Tab title="Field order">
+    Choose field order based on query patterns:
+    
+    ```rust
+    // If you often query by city, then filter by age:
+    db.create_compound_index("users", "idx1", &["city", "age"], false)?;
+    
+    // If you often query by age, then filter by city:
+    db.create_compound_index("users", "idx2", &["age", "city"], false)?;
+    
+    // For different query patterns, create separate indexes
+    ```
+  </Tab>
+  <Tab title="Unique compound">
+    ```rust
+    // Ensure combination of fields is unique
+    db.create_compound_index(
+        "reservations",
+        "room_date_unique",
+        &["room_id", "date"],
+        true  // unique combination
+    )?;
+    
+    // Same room can't be reserved twice on the same date
+    ```
+  </Tab>
+</Tabs>
+
+## Using indexes
+
+Once created, indexes are used automatically by the query engine.
+
+### Index-optimized queries
+
+```rust
+// After creating index on "email"
+db.create_index("users", "email_idx", "email", false)?;
+
+let users = db.collection("users");
+
+// This query automatically uses the email index
+let results = users.find("email is \"alice@example.com\"")?;
+
+// Range queries also benefit
+let results = users.find("email >= \"a\" and email < \"b\"")?;
+```
+
+### Compound index queries
+
+```rust
+// Create compound index
+db.create_compound_index(
+    "orders",
+    "customer_status_idx",
+    &["customer_id", "status"],
+    false
+)?;
+
+let orders = db.collection("orders");
+
+// ✅ Uses index: queries leftmost field
+let results = orders.find("customer_id is \"cust_123\"")?;
+
+// ✅ Uses index: queries both fields
+let results = orders.find(
+    "customer_id is \"cust_123\" and status is \"pending\""
+)?;
+
+// ❌ Cannot use index: missing leftmost field
+let results = orders.find("status is \"pending\"")?;
+```
+
+## Managing indexes
+
+### List indexes
+
+View all indexes on a collection.
+
+```rust
+let indexes = db.list_indexes("users")?;
+
+for index in indexes {
+    println!("Index: {}", index.name);
+    println!("  Fields: {:?}", index.fields);
+    println!("  Unique: {}", index.unique);
+    println!("  B-tree root: {}", index.btree_root);
+}
+```
+
+### Drop an index
+
+Remove an index when it's no longer needed.
+
+```rust
+db.drop_index("users", "old_idx")?;
+println!("Index dropped");
+```
+
+<Warning>
+Dropping an index is immediate and cannot be undone. Queries using that index will fall back to collection scans.
+</Warning>
+
+## Index strategies
+
+### Equality queries
+
+<Steps>
+
+### Identify frequently queried fields
+
+```rust
+// If you often query by email
+let user = users.find("email is \"user@example.com\"")?;
+```
+
+### Create a unique index
+
+```rust
+db.create_index("users", "email_idx", "email", true)?;
+```
+
+### Enjoy fast lookups
+
+Queries go from O(n) to O(log n) complexity.
+
+</Steps>
+
+### Range queries
+
+Indexes optimize range queries on sorted fields.
+
+```rust
+// Create index on numeric field
+db.create_index("products", "price_idx", "price", false)?;
+
+let products = db.collection("products");
+
+// Fast range query using index
+let results = products.find("price >= 10.00 and price <= 50.00")?;
+```
+
+### Multi-field queries
+
+Use compound indexes for queries with multiple conditions.
+
+```rust
+// Common query pattern: filter by status, then by date
+db.create_compound_index(
+    "tasks",
+    "status_due_idx",
+    &["status", "due_date"],
+    false
+)?;
+
+let tasks = db.collection("tasks");
+
+// Efficiently uses compound index
+let results = tasks.find(
+    "status is \"pending\" and due_date < \"2024-12-31\""
+)?;
+```
+
+### Covering indexes
+
+If your query only needs indexed fields, use projection:
+
+```rust
+// Index on email
+db.create_index("users", "email_idx", "email", false)?;
+
+// Query that only returns indexed field
+let results = users.query()
+    .filter("email >= \"a\" and email < \"b\"")
+    .project(&["email"])  // Only indexed field
+    .execute()?;
+```
+
+## Index performance
+
+### Write performance
+
+Each index adds overhead to insert, update, and delete operations.
+
+<CodeGroup>
+```rust No indexes
+let users = db.collection("users");
+
+// Fast: no index updates
+users.insert(json!({"name": "Alice", "age": 30}))?;
+```
+
+```rust With indexes
+// Slower: must update 3 indexes
+db.create_index("users", "name_idx", "name", false)?;
+db.create_index("users", "age_idx", "age", false)?;
+db.create_index("users", "email_idx", "email", true)?;
+
+users.insert(json!({
+    "name": "Alice",
+    "age": 30,
+    "email": "alice@example.com"
+}))?;
+```
+</CodeGroup>
+
+<Tip>
+**Best practice:** Only create indexes you actually use. Remove unused indexes to improve write performance.
+</Tip>
+
+### Read performance
+
+Indexes can improve read performance by orders of magnitude.
+
+| Collection size | Without index | With index |
+|----------------|---------------|------------|
+| 1,000 docs | 0.5ms | 0.01ms |
+| 10,000 docs | 5ms | 0.02ms |
+| 100,000 docs | 50ms | 0.03ms |
+| 1,000,000 docs | 500ms | 0.04ms |
+
+*Times are approximate for equality queries*
+
+## Best practices
+
+<Tip>
+**Create indexes on:**
+- Fields used in `WHERE` clauses (query filters)
+- Fields used for sorting
+- Fields used for uniqueness constraints
+- Foreign key-like fields (user_id, product_id, etc.)
+</Tip>
+
+<Warning>
+**Avoid indexing:**
+- Fields that are rarely queried
+- Fields with very low cardinality (e.g., boolean fields)
+- Very large text fields (use text indexes instead)
+- Fields that change frequently if you rarely query them
+</Warning>
+
+### Index naming conventions
+
+```rust
+// Good index names (descriptive and unique)
+db.create_index("users", "email_unique_idx", "email", true)?;
+db.create_index("users", "created_at_idx", "created_at", false)?;
+db.create_compound_index("orders", "customer_date_idx", &["customer_id", "created_at"], false)?;
+
+// Bad index names (vague, not descriptive)
+db.create_index("users", "idx1", "email", true)?;  // What does idx1 mean?
+db.create_index("users", "index", "age", false)?;   // Too generic
+```
+
+### Index maintenance
+
+<Steps>
+
+### Monitor index usage
+
+Track which queries are slow in your application.
+
+### Create indexes for slow queries
+
+```rust
+db.create_index("users", "frequently_queried_field_idx", "field", false)?;
+```
+
+### Remove unused indexes
+
+```rust
+db.drop_index("users", "rarely_used_idx")?;
+```
+
+### Rebuild indexes after bulk operations
+
+Indexes are automatically updated, but checkpoint after bulk inserts:
+
+```rust
+users.insert_many(vec![/* thousands of docs */])?;
+db.checkpoint()?;  // Flush WAL to disk
+```
+
+</Steps>
+
+## Common patterns
+
+### User lookup by email
+
+```rust
+db.create_index("users", "email_unique_idx", "email", true)?;
+
+let user = users.find_one("email is \"user@example.com\"")?;
+```
+
+### Product search by category and price
+
+```rust
+db.create_compound_index(
+    "products",
+    "category_price_idx",
+    &["category", "price"],
+    false
+)?;
+
+let products = db.collection("products");
+let results = products.find(
+    "category is \"electronics\" and price < 500.00"
+)?;
+```
+
+### Unique username/email
+
+```rust
+db.create_index("users", "username_unique", "username", true)?;
+db.create_index("users", "email_unique", "email", true)?;
+
+// Prevents duplicates automatically
+users.insert(json!({"username": "alice", "email": "alice@example.com"}))?;
+```
+
+### Time-based queries
+
+```rust
+db.create_index("events", "timestamp_idx", "timestamp", false)?;
+
+let events = db.collection("events");
+let recent = events.find("timestamp > 1704067200")?;  // Unix timestamp
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Querying" icon="magnifying-glass" href="/guides/querying">
+    Master the query language
+  </Card>
+  <Card title="Full-text search" icon="text" href="/guides/full-text-search">
+    Create text indexes for search
+  </Card>
+  <Card title="Performance" icon="gauge-high" href="/guides/performance">
+    Optimize database performance
+  </Card>
+  <Card title="Schema validation" icon="shield-check" href="/guides/schema-validation">
+    Validate document structure
+  </Card>
+</CardGroup>

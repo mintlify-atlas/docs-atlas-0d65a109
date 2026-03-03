@@ -1,0 +1,383 @@
+---
+title: CRUD operations
+description: Learn how to create, read, update, and delete documents in jasonisnthappy
+---
+
+This guide covers all CRUD (Create, Read, Update, Delete) operations in jasonisnthappy, including single and bulk operations.
+
+## Creating documents
+
+### Insert a single document
+
+Insert a document into a collection. If no `_id` is provided, one will be auto-generated.
+
+```rust Rust
+use jasonisnthappy::Database;
+use serde_json::json;
+
+let db = Database::open("my.db")?;
+let users = db.collection("users");
+
+let user = json!({
+    "name": "Alice",
+    "age": 30,
+    "email": "alice@example.com"
+});
+
+let id = users.insert(user)?;
+println!("Inserted with ID: {}", id);
+```
+
+```go Go
+import "github.com/sohzm/jasonisnthappy-go"
+
+db := jasonisnthappy.Open("my.db")
+users := db.Collection("users")
+
+user := map[string]interface{}{
+    "name":  "Alice",
+    "age":   30,
+    "email": "alice@example.com",
+}
+
+id, err := users.Insert(user)
+```
+
+```python Python
+import jasonisnthappy
+
+db = jasonisnthappy.open("my.db")
+users = db.collection("users")
+
+user = {
+    "name": "Alice",
+    "age": 30,
+    "email": "alice@example.com"
+}
+
+id = users.insert(user)
+```
+
+<Note>
+If your document includes an `_id` field and that ID already exists, the insert will fail. Use `upsert` to insert or update.
+</Note>
+
+### Insert multiple documents
+
+Insert many documents in a single transaction for better performance.
+
+```rust
+let docs = vec![
+    json!({"name": "Alice", "age": 30}),
+    json!({"name": "Bob", "age": 25}),
+    json!({"name": "Charlie", "age": 35}),
+];
+
+let ids = users.insert_many(docs)?;
+println!("Inserted {} documents", ids.len());
+```
+
+<Tip>
+Bulk inserts can achieve ~19,000 documents/second throughput. For best performance, use batches of 100-1000 documents per transaction.
+</Tip>
+
+### Typed document insertion
+
+Use Rust's type system for compile-time safety:
+
+```rust
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize)]
+struct User {
+    name: String,
+    age: u32,
+    email: String,
+}
+
+let user = User {
+    name: "Alice".to_string(),
+    age: 30,
+    email: "alice@example.com".to_string(),
+};
+
+let id = users.insert_typed(&user)?;
+```
+
+## Reading documents
+
+### Find by ID
+
+Retrieve a single document by its unique identifier.
+
+```rust
+let user = users.find_by_id("user_123")?;
+println!("Found: {}", user["name"]);
+```
+
+<CodeGroup>
+```rust Typed (Rust)
+let user: Option<User> = users.find_by_id_typed("user_123")?;
+if let Some(u) = user {
+    println!("Name: {}", u.name);
+}
+```
+
+```rust JSON Value
+let user = users.find_by_id("user_123")?;
+println!("User: {}", serde_json::to_string_pretty(&user)?);
+```
+</CodeGroup>
+
+### Find all documents
+
+Retrieve every document in a collection.
+
+```rust
+let all_users = users.find_all()?;
+for user in all_users {
+    println!("{}: age {}", user["name"], user["age"]);
+}
+```
+
+### Find with query
+
+Filter documents using jasonisnthappy's query language.
+
+```rust
+// Find users older than 25
+let results = users.find("age > 25")?;
+
+// Combine multiple conditions
+let results = users.find("age > 25 and city is \"NYC\"")?;
+
+// Use membership tests
+let results = users.find("status in [\"active\", \"premium\"]")?;
+```
+
+See the [Querying guide](/guides/querying) for the full query syntax.
+
+### Find one document
+
+Get the first document matching a query.
+
+```rust
+let admin = users.find_one("role is \"admin\"")?;
+if let Some(user) = admin {
+    println!("Admin: {}", user["name"]);
+}
+```
+
+### Count documents
+
+```rust
+// Count all documents
+let total = users.count()?;
+
+// Count with filter
+let active_count = users.count_with_query(Some("status is \"active\""))?;
+```
+
+## Updating documents
+
+### Update by ID
+
+Update fields on a specific document. Existing fields are merged.
+
+```rust
+users.update_by_id("user_123", json!({
+    "age": 31,
+    "last_login": "2024-01-15"
+}))?;
+```
+
+<Warning>
+The `_id` field cannot be changed. Updates preserve the original `_id`.
+</Warning>
+
+### Update with query
+
+Update all documents matching a query.
+
+```rust
+// Update all users in NYC
+let updated_count = users.update(
+    "city is \"NYC\"",
+    json!({"timezone": "America/New_York"})
+)?;
+println!("Updated {} users", updated_count);
+```
+
+### Update one document
+
+Update only the first match.
+
+```rust
+let updated = users.update_one(
+    "age > 30",
+    json!({"status": "senior"})
+)?;
+
+if updated {
+    println!("Document updated");
+}
+```
+
+### Upsert operations
+
+Insert a document if it doesn't exist, otherwise update it.
+
+<Steps>
+
+### Upsert by ID
+
+```rust
+use jasonisnthappy::UpsertResult;
+
+let result = users.upsert_by_id("user_123", json!({
+    "name": "Alice",
+    "age": 30
+}))?;
+
+match result {
+    UpsertResult::Inserted(id) => println!("Created new user: {}", id),
+    UpsertResult::Updated(id) => println!("Updated existing user: {}", id),
+}
+```
+
+### Upsert with query
+
+```rust
+let result = users.upsert(
+    "email is \"alice@example.com\"",
+    json!({"name": "Alice", "age": 31})
+)?;
+```
+
+</Steps>
+
+## Deleting documents
+
+### Delete by ID
+
+Remove a specific document.
+
+```rust
+users.delete_by_id("user_123")?;
+```
+
+### Delete with query
+
+Remove all documents matching a query.
+
+```rust
+// Delete inactive users
+let deleted_count = users.delete("status is \"inactive\"")?;
+println!("Deleted {} users", deleted_count);
+```
+
+### Delete one document
+
+Remove only the first match.
+
+```rust
+let deleted = users.delete_one("age < 18")?;
+if deleted {
+    println!("Deleted one document");
+}
+```
+
+## Bulk operations
+
+Perform multiple mixed operations in a single transaction.
+
+```rust
+let result = users.bulk_write()
+    .insert(json!({"name": "Alice", "age": 30}))
+    .insert(json!({"name": "Bob", "age": 25}))
+    .update_one("name is \"Alice\"", json!({"age": 31}))
+    .delete_many("age < 20")
+    .execute()?;
+
+println!("Inserted: {}", result.inserted_count);
+println!("Updated: {}", result.updated_count);
+println!("Deleted: {}", result.deleted_count);
+```
+
+<Tabs>
+  <Tab title="Ordered execution">
+    ```rust
+    // Stop on first error (default)
+    let result = users.bulk_write()
+        .ordered(true)
+        .insert(json!({"name": "Test"}))
+        .execute()?;
+    ```
+  </Tab>
+  <Tab title="Unordered execution">
+    ```rust
+    // Continue on errors
+    let result = users.bulk_write()
+        .ordered(false)
+        .insert(json!({"name": "Test1"}))
+        .insert(json!({"name": "Test2"}))
+        .execute()?;
+    
+    // Check for errors
+    if !result.errors.is_empty() {
+        for err in result.errors {
+            println!("Op {} failed: {}", err.operation_index, err.message);
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Distinct values
+
+Get unique values for a field across all documents.
+
+```rust
+// Get all unique cities
+let cities = users.distinct("city")?;
+for city in cities {
+    println!("City: {}", city);
+}
+
+// Count distinct values
+let city_count = users.count_distinct("city")?;
+println!("Users from {} different cities", city_count);
+```
+
+## Performance tips
+
+<Tip>
+**For high-throughput writes:**
+- Use `insert_many` instead of multiple `insert` calls
+- Batch 100-1000 documents per transaction
+- Consider `bulk_write` with `ordered(false)` for parallel execution
+</Tip>
+
+<Tip>
+**For reads:**
+- Use typed methods (`find_by_id_typed`) to avoid JSON parsing overhead
+- Create indexes on frequently queried fields (see [Indexes guide](/guides/indexes))
+- Use `find_one` instead of `find` when you only need the first result
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Querying" icon="magnifying-glass" href="/guides/querying">
+    Learn the query language syntax
+  </Card>
+  <Card title="Indexes" icon="bolt" href="/guides/indexes">
+    Speed up queries with indexes
+  </Card>
+  <Card title="Schema validation" icon="shield-check" href="/guides/schema-validation">
+    Enforce document structure
+  </Card>
+  <Card title="Aggregation" icon="chart-bar" href="/guides/aggregation">
+    Analyze data with pipelines
+  </Card>
+</CardGroup>

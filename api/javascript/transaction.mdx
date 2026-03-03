@@ -1,0 +1,528 @@
+---
+title: Transaction
+description: Transaction API for atomic multi-operation database changes
+---
+
+## Transaction
+
+The `Transaction` class provides ACID-compliant transaction support for performing multiple database operations atomically. Transactions ensure data consistency and allow you to roll back changes if an error occurs.
+
+## Creating a transaction
+
+Transactions are created using `db.beginTransaction()`:
+
+```typescript
+const txn = db.beginTransaction();
+
+try {
+  // Perform operations
+  txn.insert('users', { name: 'Alice', email: 'alice@example.com' });
+  txn.insert('posts', { userId: 'alice123', content: 'Hello!' });
+  
+  // Commit the transaction
+  txn.commit();
+} catch (error) {
+  // Roll back on error
+  txn.rollback();
+  throw error;
+}
+```
+
+## Transaction lifecycle
+
+### `isActive()`
+
+Checks if the transaction is still active and can be used.
+
+```typescript
+isActive(): boolean
+```
+
+<ResponseField name="active" type="boolean">
+  `true` if transaction is active, `false` if committed or rolled back
+</ResponseField>
+
+**Example**
+
+```typescript
+const txn = db.beginTransaction();
+console.log(txn.isActive()); // true
+
+txn.commit();
+console.log(txn.isActive()); // false
+```
+
+### `commit()`
+
+Commits the transaction, making all changes permanent.
+
+```typescript
+commit(): void
+```
+
+**Example**
+
+```typescript
+const txn = db.beginTransaction();
+txn.insert('users', { name: 'Alice', email: 'alice@example.com' });
+txn.commit(); // Changes are now permanent
+```
+
+### `rollback()`
+
+Rolls back the transaction, discarding all changes.
+
+```typescript
+rollback(): void
+```
+
+**Example**
+
+```typescript
+const txn = db.beginTransaction();
+try {
+  txn.insert('users', { name: 'Alice', email: 'alice@example.com' });
+  // Some operation that might fail
+  throw new Error('Something went wrong');
+} catch (error) {
+  txn.rollback(); // Discard all changes
+  console.log('Transaction rolled back');
+}
+```
+
+## CRUD operations
+
+All CRUD operations in transactions are type-safe when you use TypeScript generics.
+
+### `insert()`
+
+Inserts a document into a collection.
+
+```typescript
+insert<T extends Document>(collectionName: string, doc: Omit<T, '_id'>): string
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="doc" type="Omit<T, '_id'>" required>
+  Document to insert (without `_id` field, which will be auto-generated)
+</ParamField>
+
+<ResponseField name="id" type="string">
+  The auto-generated `_id` of the inserted document
+</ResponseField>
+
+**Example**
+
+```typescript
+interface User extends Document {
+  _id: string;
+  name: string;
+  email: string;
+  age: number;
+}
+
+const txn = db.beginTransaction();
+const userId = txn.insert<User>('users', {
+  name: 'Alice',
+  email: 'alice@example.com',
+  age: 30
+});
+
+console.log(`Inserted user with ID: ${userId}`);
+txn.commit();
+```
+
+### `findById()`
+
+Finds a document by its ID.
+
+```typescript
+findById<T extends Document>(collectionName: string, id: string): T | null
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Document ID to find
+</ParamField>
+
+<ResponseField name="document" type="T | null">
+  The document if found, `null` otherwise
+</ResponseField>
+
+**Example**
+
+```typescript
+const txn = db.beginTransaction();
+const user = txn.findById<User>('users', 'user123');
+
+if (user) {
+  console.log(`Found user: ${user.name}`);
+}
+
+txn.commit();
+```
+
+### `updateById()`
+
+Updates a document by its ID.
+
+```typescript
+updateById<T extends Document>(collectionName: string, id: string, updates: Partial<T>): void
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Document ID to update
+</ParamField>
+
+<ParamField path="updates" type="Partial<T>" required>
+  Partial document with fields to update
+</ParamField>
+
+**Example**
+
+```typescript
+const txn = db.beginTransaction();
+txn.updateById<User>('users', 'user123', {
+  age: 31,
+  email: 'newemail@example.com'
+});
+txn.commit();
+```
+
+### `deleteById()`
+
+Deletes a document by its ID.
+
+```typescript
+deleteById(collectionName: string, id: string): void
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="id" type="string" required>
+  Document ID to delete
+</ParamField>
+
+**Example**
+
+```typescript
+const txn = db.beginTransaction();
+txn.deleteById('users', 'user123');
+txn.commit();
+```
+
+### `findAll()`
+
+Retrieves all documents from a collection.
+
+```typescript
+findAll<T extends Document>(collectionName: string): T[]
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="documents" type="T[]">
+  Array of all documents in the collection
+</ResponseField>
+
+**Example**
+
+```typescript
+const txn = db.beginTransaction();
+const allUsers = txn.findAll<User>('users');
+console.log(`Total users: ${allUsers.length}`);
+txn.commit();
+```
+
+### `count()`
+
+Counts all documents in a collection.
+
+```typescript
+count(collectionName: string): number
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="count" type="number">
+  Number of documents in the collection
+</ResponseField>
+
+**Example**
+
+```typescript
+const txn = db.beginTransaction();
+const userCount = txn.count('users');
+console.log(`Total users: ${userCount}`);
+txn.commit();
+```
+
+## Collection management
+
+### `createCollection()`
+
+Creates a new collection.
+
+```typescript
+createCollection(collectionName: string): void
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection to create
+</ParamField>
+
+**Example**
+
+```typescript
+const txn = db.beginTransaction();
+txn.createCollection('posts');
+txn.createCollection('comments');
+txn.commit();
+```
+
+### `dropCollection()`
+
+Deletes a collection and all its documents.
+
+```typescript
+dropCollection(collectionName: string): void
+```
+
+<ParamField path="collectionName" type="string" required>
+  Name of the collection to drop
+</ParamField>
+
+**Example**
+
+```typescript
+const txn = db.beginTransaction();
+txn.dropCollection('temp_data');
+txn.commit();
+```
+
+### `renameCollection()`
+
+Renames a collection.
+
+```typescript
+renameCollection(oldName: string, newName: string): void
+```
+
+<ParamField path="oldName" type="string" required>
+  Current name of the collection
+</ParamField>
+
+<ParamField path="newName" type="string" required>
+  New name for the collection
+</ParamField>
+
+**Example**
+
+```typescript
+const txn = db.beginTransaction();
+txn.renameCollection('users', 'accounts');
+txn.commit();
+```
+
+## Advanced transaction patterns
+
+### Multi-collection atomic operations
+
+Transactions can span multiple collections, ensuring atomicity across all operations:
+
+```typescript
+interface User extends Document {
+  _id: string;
+  name: string;
+  email: string;
+}
+
+interface Post extends Document {
+  _id: string;
+  userId: string;
+  content: string;
+  createdAt: number;
+}
+
+const txn = db.beginTransaction();
+
+try {
+  // Insert user
+  const userId = txn.insert<User>('users', {
+    name: 'Alice',
+    email: 'alice@example.com'
+  });
+  
+  // Insert posts for the user
+  txn.insert<Post>('posts', {
+    userId,
+    content: 'My first post!',
+    createdAt: Date.now()
+  });
+  
+  txn.insert<Post>('posts', {
+    userId,
+    content: 'My second post!',
+    createdAt: Date.now()
+  });
+  
+  // All operations succeed or fail together
+  txn.commit();
+} catch (error) {
+  txn.rollback();
+  console.error('Failed to create user and posts:', error);
+}
+```
+
+### Conditional updates
+
+You can perform read-modify-write operations safely within a transaction:
+
+```typescript
+const txn = db.beginTransaction();
+
+try {
+  const user = txn.findById<User>('users', 'user123');
+  
+  if (!user) {
+    throw new Error('User not found');
+  }
+  
+  // Only update if condition is met
+  if (user.age < 18) {
+    throw new Error('User must be 18 or older');
+  }
+  
+  txn.updateById<User>('users', 'user123', {
+    verified: true
+  });
+  
+  txn.commit();
+} catch (error) {
+  txn.rollback();
+  throw error;
+}
+```
+
+### Data migration
+
+Transactions are ideal for data migrations:
+
+```typescript
+const txn = db.beginTransaction();
+
+try {
+  // Read all documents
+  const users = txn.findAll<User>('users');
+  
+  // Migrate each document
+  for (const user of users) {
+    // Add new field
+    txn.updateById<User>('users', user._id, {
+      status: 'active',
+      updatedAt: Date.now()
+    });
+  }
+  
+  txn.commit();
+  console.log(`Migrated ${users.length} users`);
+} catch (error) {
+  txn.rollback();
+  console.error('Migration failed:', error);
+}
+```
+
+## Transaction retry configuration
+
+Transactions automatically retry on conflicts. Configure retry behavior using database-level settings:
+
+```typescript
+import { Database } from '@sohzm/jasonisnthappy';
+
+const db = Database.open('./my-database.db');
+
+// Configure transaction retry behavior
+db.setTransactionConfig({
+  maxRetries: 5,              // Retry up to 5 times
+  retryBackoffBaseMs: 10,     // Start with 10ms delay
+  maxRetryBackoffMs: 1000     // Max 1 second between retries
+});
+
+// Transactions will now use this configuration
+const txn = db.beginTransaction();
+```
+
+## Best practices
+
+### Keep transactions short
+
+Transactions hold locks, so keep them as short as possible:
+
+```typescript
+// Good: Short transaction
+const txn = db.beginTransaction();
+txn.insert('users', userData);
+txn.commit();
+
+// Avoid: Long-running transaction
+const txn2 = db.beginTransaction();
+for (let i = 0; i < 100000; i++) {
+  txn2.insert('logs', { message: `Log ${i}` });
+}
+txn2.commit(); // This locks the database for too long
+```
+
+### Always handle errors
+
+Always use try-catch and rollback on errors:
+
+```typescript
+const txn = db.beginTransaction();
+
+try {
+  // Operations
+  txn.insert('users', userData);
+  txn.commit();
+} catch (error) {
+  txn.rollback();
+  throw error;
+}
+```
+
+### Don't reuse transactions
+
+Create a new transaction for each atomic operation:
+
+```typescript
+// Good: New transaction each time
+function createUser(data) {
+  const txn = db.beginTransaction();
+  try {
+    const id = txn.insert('users', data);
+    txn.commit();
+    return id;
+  } catch (error) {
+    txn.rollback();
+    throw error;
+  }
+}
+
+// Avoid: Reusing transaction
+const globalTxn = db.beginTransaction(); // Don't do this
+```

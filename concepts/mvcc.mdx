@@ -1,0 +1,415 @@
+---
+title: MVCC (Multi-Version Concurrency Control)
+description: Snapshot isolation through version management and garbage collection
+---
+
+MVCC (Multi-Version Concurrency Control) is the technique jasonisnthappy uses to provide **snapshot isolation**: multiple transactions can read and write concurrently without blocking each other. Each transaction sees a consistent snapshot of the database from when it began.
+
+## How MVCC works
+
+Instead of locking documents, jasonisnthappy **creates new versions** on every update:
+
+```
+Timeline:           t1        t2        t3        t4
+Transactions:    [TX1 begin] [TX2 begin] [TX1 commit] [TX2 commit]
+
+Document versions:
+  v1: xmin=0, xmax=3  ────────────────────────────┤
+  v2: xmin=3, xmax=0                              └───────────────→
+
+Visibility:
+  TX1 (snapshot=0): sees v1 (xmin=0 ≤ snapshot)
+  TX2 (snapshot=0): sees v1 (xmin=0 ≤ snapshot)
+  TX3 (snapshot=3): sees v2 (xmin=3 ≤ snapshot, v1.xmax=3 > snapshot)
+```
+
+- **xmin**: Transaction ID that created this version
+- **xmax**: Transaction ID that deleted/updated this version (0 = still current)
+- **snapshot**: Transaction's view of the latest committed transaction when it began
+
+<Info>
+A version is visible to a transaction if:
+- `xmin ≤ snapshot_id` (version existed at snapshot time)
+- `xmax == 0 OR xmax > snapshot_id` (version wasn't deleted yet)
+</Info>
+
+## Transaction manager
+
+The `TransactionManager` (src/core/mvcc.rs:21) tracks active transactions:
+
+```rust
+pub struct TransactionManager {
+    next_tx_id: Arc<AtomicU64>,              // Monotonic counter
+    last_committed_tx_id: Arc<AtomicU64>,    // Latest commit
+    active_txs: Arc<RwLock<HashMap<TransactionID, TransactionInfo>>>,
+}
+```
+
+### Transaction lifecycle
+
+**Begin transaction:**
+
+```rust
+pub fn begin_transaction(&self) -> Result<TransactionID> {
+    let tx_id = self.next_tx_id.fetch_add(1, Ordering::SeqCst);
+    let snapshot_time = self.get_latest_committed_tx_id();
+    
+    self.active_txs.insert(tx_id, TransactionInfo {
+        id: tx_id,
+        start_time: snapshot_time,
+        status: TxStatus::Active,
+    });
+    
+    Ok(tx_id)
+}
+```
+
+- Allocate unique transaction ID (src/core/mvcc.rs:44)
+- Capture current committed transaction ID as snapshot
+- Register as active
+
+**Commit transaction:**
+
+```rust
+pub fn commit_transaction(&self, tx_id: TransactionID) -> Result<()> {
+    self.active_txs.remove(&tx_id);
+    
+    // Advance global commit watermark
+    let current_last = self.last_committed_tx_id.load(Ordering::SeqCst);
+    if tx_id > current_last {
+        self.last_committed_tx_id.store(tx_id, Ordering::SeqCst);
+    }
+    
+    Ok(())
+}
+```
+
+- Remove from active transactions (src/core/mvcc.rs:73)
+- Update global commit timestamp if newer
+
+<Note>
+The `last_committed_tx_id` is what new transactions use as their snapshot ID. This ensures they see all previously committed work.
+</Note>
+
+## Document versioning
+
+Each document stores MVCC metadata in its header:
+
+```rust
+pub struct DocumentVersion {
+    pub doc_id: String,
+    pub xmin: TransactionID,     // Created by
+    pub xmax: TransactionID,     // Deleted by (0 = current)
+    pub data: Vec<u8>,           // JSON document
+    pub page_num: PageNum,       // Location in database
+}
+```
+
+### Visibility check
+
+The visibility rule (src/core/mvcc.rs:139):
+
+```rust
+impl DocumentVersion {
+    pub fn is_visible(&self, tx_id: TransactionID) -> bool {
+        // Too new? Not created yet in this snapshot
+        if self.xmin > tx_id {
+            return false;
+        }
+        
+        // Deleted before this snapshot?
+        if self.xmax != 0 && self.xmax <= tx_id {
+            return false;
+        }
+        
+        true  // Created before snapshot, not deleted yet
+    }
+}
+```
+
+**Examples:**
+
+| Version       | Snapshot ID | Visible? | Reason |
+|---------------|-------------|----------|--------|
+| xmin=5, xmax=0 | tx=10      | ✓        | Created at 5, still current |
+| xmin=5, xmax=0 | tx=3       | ✗        | Created at 5, after snapshot |
+| xmin=5, xmax=8 | tx=10      | ✗        | Deleted at 8, before snapshot |
+| xmin=5, xmax=8 | tx=6       | ✓        | Created at 5, deleted at 8, in between |
+
+## Version chains
+
+When a document is updated, the old version is added to a **version chain** (src/core/mvcc.rs:152):
+
+```rust
+pub struct VersionChain {
+    pub doc_id: String,
+    versions: Arc<RwLock<Vec<DocumentVersion>>>,
+}
+```
+
+Each document can have multiple versions:
+
+```
+Document "alice" version chain:
+[
+    { xmin: 1, xmax: 5, data: {"name": "Alice", "age": 30} },
+    { xmin: 5, xmax: 10, data: {"name": "Alice", "age": 31} },
+    { xmin: 10, xmax: 0, data: {"name": "Alice", "age": 32} },  ← current
+]
+```
+
+- Transaction with snapshot=3 sees version 1
+- Transaction with snapshot=7 sees version 2  
+- Transaction with snapshot=12 sees version 3
+
+Version chains are stored in memory at the database level (src/core/database.rs:163):
+
+```rust
+version_chains: Arc<RwLock<HashMap<
+    String,                                      // collection name
+    HashMap<String, VersionChain>                // doc_id -> chain
+>>>
+```
+
+## Update flow with MVCC
+
+Here's what happens when you update a document:
+
+```rust
+let mut tx = db.begin()?;  // snapshot_id = 10, tx_id = 11
+let mut users = tx.collection("users")?;
+
+let mut alice = users.find_one("alice")?;  // Reads v2 (xmin=5)
+alice["age"] = json!(33);
+users.update("alice", alice)?;
+
+tx.commit()?;
+```
+
+**Step-by-step:**
+
+1. **Read current version** (xmin=10, xmax=0)
+   - Track original xmin in `doc_original_xmin` for conflict detection
+   - Mark that document existed in snapshot (`doc_existed_in_snapshot`)
+
+2. **Create new version**
+   - Allocate new page for document
+   - Write document with xmin=11 (this transaction's ID), xmax=0
+   - Insert into transaction's write buffer
+
+3. **On commit**
+   - Check for conflicts: has the committed version's xmin changed?
+   - Write new version to B-tree
+   - Add old version (xmin=10, xmax=11) to version chain
+   - Update B-tree root atomically
+
+<Accordion title="Why track doc_original_xmin?">
+Conflict detection compares the xmin we first read against the current committed xmin:
+
+```rust
+let original_xmin = 10;  // What we read at the start
+let committed_xmin = 12; // What's in the B-tree now
+
+if committed_xmin != original_xmin && committed_xmin > snapshot_id {
+    return Err(Error::TxConflict);  // Someone modified it!
+}
+```
+
+This implements **first-committer-wins**: if another transaction committed an update after our snapshot, we conflict.
+</Accordion>
+
+## Garbage collection
+
+Old versions accumulate over time. **Garbage collection** removes versions that no active transaction can see.
+
+### GC algorithm
+
+The GC process (src/core/mvcc.rs:172) works as follows:
+
+```rust
+pub fn garbage_collect(&self, oldest_active_tx: TransactionID) -> Result<Vec<DocumentVersion>> {
+    let mut versions = self.versions.write()?;
+    let mut removed = Vec::new();
+    let mut kept = Vec::new();
+    
+    for version in versions.drain(..) {
+        if version.xmin >= oldest_active_tx ||           // Version created by active TX
+           (version.xmax == 0 || version.xmax >= oldest_active_tx) {  // Still visible
+            kept.push(version);
+        } else {
+            removed.push(version);  // No one can see this - remove it
+        }
+    }
+    
+    *versions = kept;
+    Ok(removed)
+}
+```
+
+**Key insight:** A version can be removed if:
+- It was created AND deleted before the oldest active transaction
+- No active transaction can possibly see it
+
+### Running garbage collection
+
+Call `db.garbage_collect()` to reclaim space:
+
+```rust
+let stats = db.garbage_collect()?;
+println!("Removed {} old versions", stats.versions_removed);
+println!("Freed {} pages ({} bytes)", stats.pages_freed, stats.bytes_freed);
+```
+
+**Example:**
+
+```
+Active transactions: [TX 100, TX 105]
+Oldest active: 100
+
+Version chain:
+[
+    { xmin: 50, xmax: 60 },  ← Can remove (60 < 100)
+    { xmin: 60, xmax: 80 },  ← Can remove (80 < 100)
+    { xmin: 80, xmax: 95 },  ← Can remove (95 < 100)
+    { xmin: 95, xmax: 0 },   ← Keep (xmax=0 means current)
+]
+```
+
+After GC:
+```
+[
+    { xmin: 95, xmax: 0 },   ← Only this remains
+]
+```
+
+<Warning>
+**Long-running transactions prevent GC:** If a transaction stays open for a long time, its snapshot_id becomes the "oldest active", preventing all versions created after it from being cleaned up. Keep transactions short!
+</Warning>
+
+## MVCC and the B-tree
+
+The B-tree only stores the **current version** of each document (the one with xmax=0). Old versions live in version chains.
+
+When a transaction reads a document:
+
+1. **Search B-tree** for document ID → get current version
+2. **Check visibility** of current version
+   - If visible → return it
+   - If not visible → search version chain for visible version
+
+<Info>
+This design optimizes for the common case: most reads access the current version, requiring only a B-tree lookup. Version chain traversal only happens for reading old snapshots.
+</Info>
+
+## Conflict detection revisited
+
+Now we can understand conflict detection in detail (src/core/transaction.rs:357):
+
+```rust
+fn detect_write_conflicts(&self) -> Result<()> {
+    for (doc_id, _) in collection_writes.iter() {
+        // Skip new inserts (optimization)
+        if !doc_existed_in_snapshot.get(doc_id).unwrap_or(false) {
+            continue;
+        }
+        
+        // Get xmin we saw when we first read
+        let original_xmin = doc_original_xmin.get(doc_id)?;
+        
+        // Read CURRENT committed version (not our write)
+        let current_btree = TxBTree::new(pager, current_root, empty_writes);
+        let committed_page = current_btree.search(doc_id)?;
+        let committed_vdoc = read_versioned_document(pager, committed_page)?;
+        
+        // Conflict if xmin changed AND new version is after our snapshot
+        if committed_vdoc.xmin != original_xmin {
+            if committed_vdoc.xmin > self.snapshot_id {
+                return Err(Error::TxConflict);
+            }
+        }
+    }
+    Ok(())
+}
+```
+
+**Why check `xmin > snapshot_id`?**
+
+If the new xmin is ≤ our snapshot, it means the update was committed before we started, so we should have seen it. No conflict. But if xmin > snapshot, it means someone committed after we began, which is a **write-write conflict**.
+
+## Performance implications
+
+### Read performance
+
+- **Best case**: Document is current → single B-tree lookup
+- **Worst case**: Reading old snapshot → B-tree + version chain scan
+- **Typical**: ~0.009ms per query (README.md:74)
+
+### Write performance
+
+- Each update creates a new page (copy-on-write)
+- Version chains grow until GC
+- **Benefit**: No lock contention for reads
+
+**Benchmark (README.md:103):**
+- Update: ~7.90ms with full ACID + MVCC
+- Includes WAL write, fsync, and conflict check
+
+### Memory usage
+
+- Version chains stored in memory: `HashMap<Collection, HashMap<DocID, Vec<Version>>>`
+- Old versions occupy disk pages until GC
+- **Mitigation**: Regular garbage collection, short transactions
+
+## Snapshot isolation vs serializability
+
+jasonisnthappy provides **snapshot isolation**, which prevents:
+
+✓ **Dirty reads** - Never see uncommitted changes
+✓ **Non-repeatable reads** - Snapshot is consistent throughout transaction
+✓ **Phantom reads** - Snapshot includes consistent set of documents
+✓ **Lost updates** - Conflict detection prevents concurrent overwrites
+
+But allows:
+
+✗ **Write skew** - Two transactions read overlapping data, write disjoint data
+
+**Example of write skew:**
+
+```rust
+// Initial: alice.balance=100, bob.balance=100, total must be >= 100
+
+// TX1: Transfer from Alice
+let alice = users.find_one("alice")?;  // 100
+let bob = users.find_one("bob")?;     // 100
+if alice.balance + bob.balance >= 100 {
+    alice.balance -= 50;  // Now 50
+    users.update("alice", alice)?;
+}
+
+// TX2: Transfer from Bob (concurrent)
+let alice = users.find_one("alice")?;  // 100 (old snapshot)
+let bob = users.find_one("bob")?;     // 100
+if alice.balance + bob.balance >= 100 {
+    bob.balance -= 50;  // Now 50
+    users.update("bob", bob)?;
+}
+
+// Both commit! Total is now 100, but invariant was violated mid-flight
+```
+
+Both transactions commit because they modify different documents (no write-write conflict). But the total balance invariant is violated.
+
+<Tip>
+**Workaround:** Use a single "accounts" document to track totals, or model the constraint as a write to a shared document that forces conflict detection.
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Transactions" icon="arrow-right-arrow-left" href="/concepts/transactions">
+    Learn about commit, rollback, and conflict handling
+  </Card>
+  <Card title="Storage Engine" icon="database" href="/concepts/storage-engine">
+    See how B-trees and copy-on-write enable MVCC
+  </Card>
+</CardGroup>

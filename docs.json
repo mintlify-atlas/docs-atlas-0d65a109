@@ -1,122 +1,142 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "jasonisnthappy",
+  "theme": "sequoia",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#4F46E5",
+    "light": "#818CF8",
+    "dark": "#3730A3"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/sohzm/jasonisnthappy"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/sohzm/jasonisnthappy"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "installation"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/architecture",
+              "concepts/transactions",
+              "concepts/mvcc",
+              "concepts/storage-engine"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Guides",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "guides/crud-operations",
+              "guides/querying",
+              "guides/indexes",
+              "guides/schema-validation",
+              "guides/aggregation",
+              "guides/change-streams",
+              "guides/full-text-search",
+              "guides/backup-restore",
+              "guides/performance"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Language SDKs",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "sdks/rust",
+              "sdks/go",
+              "sdks/python",
+              "sdks/javascript"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Rust API",
             "pages": [
-              "api-reference/introduction"
+              "api/rust/database",
+              "api/rust/transaction",
+              "api/rust/collection",
+              "api/rust/query-builder",
+              "api/rust/aggregation",
+              "api/rust/schema",
+              "api/rust/watch"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Go API",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/go/database",
+              "api/go/transaction",
+              "api/go/examples"
+            ]
+          },
+          {
+            "group": "Python API",
+            "pages": [
+              "api/python/database",
+              "api/python/transaction",
+              "api/python/collection",
+              "api/python/examples"
+            ]
+          },
+          {
+            "group": "JavaScript API",
+            "pages": [
+              "api/javascript/database",
+              "api/javascript/transaction",
+              "api/javascript/collection",
+              "api/javascript/types"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "CLI & Tools",
+        "groups": [
+          {
+            "group": "Command Line",
+            "pages": [
+              "cli/overview",
+              "cli/database-commands",
+              "cli/collection-commands",
+              "cli/document-commands",
+              "cli/repl"
+            ]
+          },
+          {
+            "group": "Web UI",
+            "pages": [
+              "web-ui/overview",
+              "web-ui/rest-api"
+            ]
+          },
+          {
+            "group": "Monitoring",
+            "pages": [
+              "monitoring/metrics",
+              "monitoring/observability"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

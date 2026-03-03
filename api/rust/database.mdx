@@ -1,0 +1,616 @@
+---
+title: Database
+description: Core database operations for jasonisnthappy
+---
+
+The `Database` struct is the main entry point for interacting with jasonisnthappy. It manages connections, transactions, collections, and metadata.
+
+## Opening a database
+
+### `Database::open`
+
+Open a database at the specified path with default options.
+
+```rust
+pub fn open(path: &str) -> Result<Database>
+```
+
+<ParamField path="path" type="&str" required>
+  Path to the database file
+</ParamField>
+
+**Returns:** `Result<Database>` - The opened database instance
+
+**Example:**
+```rust
+use jasonisnthappy::Database;
+
+let db = Database::open("my.db")?;
+```
+
+---
+
+### `Database::open_with_options`
+
+Open a database with custom configuration options.
+
+```rust
+pub fn open_with_options(path: &str, opts: DatabaseOptions) -> Result<Database>
+```
+
+<ParamField path="path" type="&str" required>
+  Path to the database file
+</ParamField>
+
+<ParamField path="opts" type="DatabaseOptions" required>
+  Configuration options for the database
+</ParamField>
+
+**Example:**
+```rust
+use jasonisnthappy::{Database, DatabaseOptions};
+
+let opts = DatabaseOptions {
+    cache_size: 50_000,
+    auto_checkpoint_threshold: 2000,
+    read_only: false,
+    max_bulk_operations: 100_000,
+    max_document_size: 67_108_864,
+    ..Default::default()
+};
+
+let db = Database::open_with_options("my.db", opts)?;
+```
+
+## DatabaseOptions
+
+Configuration options for opening a database.
+
+<ResponseField name="cache_size" type="usize" default="25,000">
+  Number of pages to cache in memory (1 page = ~4KB)
+</ResponseField>
+
+<ResponseField name="auto_checkpoint_threshold" type="u64" default="1,000">
+  Automatically checkpoint when WAL reaches this many frames
+</ResponseField>
+
+<ResponseField name="file_permissions" type="u32" default="0o644">
+  Unix file permissions for database files (Unix only)
+</ResponseField>
+
+<ResponseField name="read_only" type="bool" default="false">
+  Open database in read-only mode
+</ResponseField>
+
+<ResponseField name="max_bulk_operations" type="usize" default="100,000">
+  Maximum number of documents in bulk operations
+</ResponseField>
+
+<ResponseField name="max_document_size" type="usize" default="67,108,864">
+  Maximum size of a single document in bytes (64MB)
+</ResponseField>
+
+<ResponseField name="max_request_body_size" type="usize" default="52,428,800">
+  Maximum HTTP request body size for web server (50MB)
+</ResponseField>
+
+## Collection operations
+
+### `collection`
+
+Get a handle to a collection.
+
+```rust
+pub fn collection(&self, name: &str) -> Collection
+```
+
+<ParamField path="name" type="&str" required>
+  Name of the collection
+</ParamField>
+
+**Returns:** `Collection` - A collection handle
+
+**Example:**
+```rust
+let users = db.collection("users");
+users.insert(json!({"name": "Alice", "age": 30}))?;
+```
+
+---
+
+### `list_collections`
+
+List all collections in the database.
+
+```rust
+pub fn list_collections(&self) -> Result<Vec<String>>
+```
+
+**Returns:** `Result<Vec<String>>` - Sorted list of collection names
+
+**Example:**
+```rust
+let collections = db.list_collections()?;
+for name in collections {
+    println!("Collection: {}", name);
+}
+```
+
+---
+
+### `collection_stats`
+
+Get detailed statistics for a specific collection.
+
+```rust
+pub fn collection_stats(&self, name: &str) -> Result<CollectionInfo>
+```
+
+<ParamField path="name" type="&str" required>
+  Name of the collection
+</ParamField>
+
+**Returns:** `Result<CollectionInfo>` - Collection statistics
+
+**Example:**
+```rust
+let stats = db.collection_stats("users")?;
+println!("Documents: {}", stats.document_count);
+println!("Indexes: {}", stats.indexes.len());
+```
+
+## Transaction management
+
+### `begin`
+
+Begin a new transaction.
+
+```rust
+pub fn begin(&self) -> Result<Transaction>
+```
+
+**Returns:** `Result<Transaction>` - A new transaction
+
+**Example:**
+```rust
+let mut tx = db.begin()?;
+let mut users = tx.collection("users")?;
+// Perform operations...
+tx.commit()?;
+```
+
+---
+
+### `run_transaction`
+
+Execute a function within a transaction with automatic retry on conflicts.
+
+```rust
+pub fn run_transaction<F, R>(&self, f: F) -> Result<R>
+where
+    F: Fn(&mut Transaction) -> Result<R>
+```
+
+<ParamField path="f" type="Fn(&mut Transaction) -> Result<R>" required>
+  Function to execute within the transaction
+</ParamField>
+
+**Returns:** `Result<R>` - The result from the transaction function
+
+**Example:**
+```rust
+let result = db.run_transaction(|tx| {
+    let mut users = tx.collection("users")?;
+    users.insert(json!({"name": "Bob", "age": 25}))?;
+    Ok(())
+})?;
+```
+
+## Index management
+
+### `create_index`
+
+Create a single-field index on a collection.
+
+```rust
+pub fn create_index(
+    &self,
+    collection_name: &str,
+    index_name: &str,
+    field: &str,
+    unique: bool
+) -> Result<()>
+```
+
+<ParamField path="collection_name" type="&str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="index_name" type="&str" required>
+  Name for the index
+</ParamField>
+
+<ParamField path="field" type="&str" required>
+  Field to index
+</ParamField>
+
+<ParamField path="unique" type="bool" required>
+  Whether to enforce uniqueness
+</ParamField>
+
+**Example:**
+```rust
+db.create_index("users", "email_idx", "email", true)?;
+```
+
+---
+
+### `create_compound_index`
+
+Create a compound index on multiple fields.
+
+```rust
+pub fn create_compound_index(
+    &self,
+    collection_name: &str,
+    index_name: &str,
+    fields: &[&str],
+    unique: bool
+) -> Result<()>
+```
+
+<ParamField path="collection_name" type="&str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="index_name" type="&str" required>
+  Name for the index
+</ParamField>
+
+<ParamField path="fields" type="&[&str]" required>
+  Ordered list of fields to include in the compound index
+</ParamField>
+
+<ParamField path="unique" type="bool" required>
+  Whether to enforce uniqueness on the combination of field values
+</ParamField>
+
+**Example:**
+```rust
+db.create_compound_index("users", "city_age_idx", &["city", "age"], false)?;
+```
+
+---
+
+### `create_text_index`
+
+Create a text index for full-text search.
+
+```rust
+pub fn create_text_index(
+    &self,
+    collection_name: &str,
+    index_name: &str,
+    fields: &[&str]
+) -> Result<()>
+```
+
+<ParamField path="collection_name" type="&str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="index_name" type="&str" required>
+  Name for the text index
+</ParamField>
+
+<ParamField path="fields" type="&[&str]" required>
+  List of text fields to index for search
+</ParamField>
+
+**Example:**
+```rust
+db.create_text_index("posts", "search_idx", &["title", "body"])?;
+```
+
+---
+
+### `drop_index`
+
+Drop an index from a collection.
+
+```rust
+pub fn drop_index(&self, collection_name: &str, index_name: &str) -> Result<()>
+```
+
+<ParamField path="collection_name" type="&str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="index_name" type="&str" required>
+  Name of the index to drop
+</ParamField>
+
+**Example:**
+```rust
+db.drop_index("users", "email_idx")?;
+```
+
+---
+
+### `list_indexes`
+
+List all indexes for a specific collection.
+
+```rust
+pub fn list_indexes(&self, collection_name: &str) -> Result<Vec<IndexInfo>>
+```
+
+<ParamField path="collection_name" type="&str" required>
+  Name of the collection
+</ParamField>
+
+**Returns:** `Result<Vec<IndexInfo>>` - List of index information
+
+## Schema validation
+
+### `set_schema`
+
+Set a validation schema for a collection.
+
+```rust
+pub fn set_schema(&self, collection_name: &str, schema: Schema) -> Result<()>
+```
+
+<ParamField path="collection_name" type="&str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="schema" type="Schema" required>
+  The schema to apply
+</ParamField>
+
+**Example:**
+```rust
+use jasonisnthappy::{Schema, ValueType};
+use std::collections::HashMap;
+
+let mut schema = Schema::new();
+schema.value_type = Some(ValueType::Object);
+schema.required = Some(vec!["name".to_string(), "email".to_string()]);
+
+let mut properties = HashMap::new();
+let mut name_schema = Schema::new();
+name_schema.value_type = Some(ValueType::String);
+name_schema.min_length = Some(1);
+properties.insert("name".to_string(), name_schema);
+
+schema.properties = Some(properties);
+db.set_schema("users", schema)?;
+```
+
+---
+
+### `get_schema`
+
+Get the validation schema for a collection.
+
+```rust
+pub fn get_schema(&self, collection_name: &str) -> Option<Schema>
+```
+
+<ParamField path="collection_name" type="&str" required>
+  Name of the collection
+</ParamField>
+
+**Returns:** `Option<Schema>` - The schema if set, or None
+
+---
+
+### `remove_schema`
+
+Remove the validation schema from a collection.
+
+```rust
+pub fn remove_schema(&self, collection_name: &str) -> Result<()>
+```
+
+<ParamField path="collection_name" type="&str" required>
+  Name of the collection
+</ParamField>
+
+## Database maintenance
+
+### `checkpoint`
+
+Manually trigger a WAL checkpoint.
+
+```rust
+pub fn checkpoint(&self) -> Result<()>
+```
+
+**Example:**
+```rust
+db.checkpoint()?;
+```
+
+---
+
+### `garbage_collect`
+
+Remove old document versions that are no longer needed.
+
+```rust
+pub fn garbage_collect(&self) -> Result<GarbageCollectionStats>
+```
+
+**Returns:** `Result<GarbageCollectionStats>` - Statistics about the garbage collection
+
+**Example:**
+```rust
+let stats = db.garbage_collect()?;
+println!("Freed {} pages", stats.pages_freed);
+```
+
+---
+
+### `backup`
+
+Create a backup of the database.
+
+```rust
+pub fn backup(&self, dest_path: &str) -> Result<()>
+```
+
+<ParamField path="dest_path" type="&str" required>
+  Destination path for the backup file
+</ParamField>
+
+**Example:**
+```rust
+db.backup("./backups/mydb-2024-01-15.db")?;
+```
+
+---
+
+### `verify_backup`
+
+Verify a backup file by checking its integrity.
+
+```rust
+pub fn verify_backup(backup_path: &str) -> Result<BackupInfo>
+```
+
+<ParamField path="backup_path" type="&str" required>
+  Path to the backup file to verify
+</ParamField>
+
+**Returns:** `Result<BackupInfo>` - Backup information if valid
+
+**Example:**
+```rust
+let info = Database::verify_backup("./backups/mydb.db")?;
+println!("Backup has {} collections", info.num_collections);
+```
+
+---
+
+### `close`
+
+Close the database connection.
+
+```rust
+pub fn close(&self) -> Result<()>
+```
+
+**Example:**
+```rust
+db.close()?;
+```
+
+## Database information
+
+### `info`
+
+Get comprehensive database information.
+
+```rust
+pub fn info(&self) -> Result<DatabaseInfo>
+```
+
+**Returns:** `Result<DatabaseInfo>` - Detailed database statistics
+
+**Example:**
+```rust
+let info = db.info()?;
+println!("Database: {}", info.path);
+println!("Collections: {}", info.collections.len());
+println!("Total documents: {}", info.total_documents);
+```
+
+---
+
+### `metrics`
+
+Get a snapshot of current database metrics.
+
+```rust
+pub fn metrics(&self) -> MetricsSnapshot
+```
+
+**Returns:** `MetricsSnapshot` - Current metrics
+
+**Example:**
+```rust
+let metrics = db.metrics();
+println!("Page reads: {}", metrics.page_reads);
+println!("Page writes: {}", metrics.page_writes);
+```
+
+---
+
+### `path`
+
+Get the database file path.
+
+```rust
+pub fn path(&self) -> &str
+```
+
+**Returns:** `&str` - The database file path
+
+---
+
+### `is_read_only`
+
+Check if the database is in read-only mode.
+
+```rust
+pub fn is_read_only(&self) -> bool
+```
+
+**Returns:** `bool` - true if read-only, false otherwise
+
+## Configuration
+
+### `set_transaction_config`
+
+Set transaction retry configuration.
+
+```rust
+pub fn set_transaction_config(&self, config: TransactionConfig)
+```
+
+<ParamField path="config" type="TransactionConfig" required>
+  Transaction configuration
+</ParamField>
+
+**Example:**
+```rust
+use jasonisnthappy::database::TransactionConfig;
+
+let config = TransactionConfig {
+    max_retries: 5,
+    retry_backoff_base_ms: 2,
+    max_retry_backoff_ms: 200,
+};
+db.set_transaction_config(config);
+```
+
+---
+
+### `set_auto_checkpoint_threshold`
+
+Set the auto-checkpoint threshold.
+
+```rust
+pub fn set_auto_checkpoint_threshold(&self, threshold: u64)
+```
+
+<ParamField path="threshold" type="u64" required>
+  Number of WAL frames before auto-checkpoint
+</ParamField>
+
+**Example:**
+```rust
+db.set_auto_checkpoint_threshold(2000);
+```

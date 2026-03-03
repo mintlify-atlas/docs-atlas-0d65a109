@@ -1,0 +1,531 @@
+---
+title: Installation
+description: Install jasonisnthappy for your programming language and platform
+---
+
+jasonisnthappy is available for Rust, Go, Python, and JavaScript (Node.js, Deno, and Bun). Choose your language below to get started.
+
+## Rust
+
+For Rust projects, add jasonisnthappy as a dependency to your `Cargo.toml`:
+
+<CodeGroup>
+```toml Cargo.toml
+[dependencies]
+jasonisnthappy = "0.1.1"
+serde_json = "1.0"  # For JSON document handling
+```
+
+```bash Terminal
+cargo add jasonisnthappy serde_json
+```
+</CodeGroup>
+
+### Features
+
+jasonisnthappy supports optional features that can be enabled in your `Cargo.toml`:
+
+```toml Cargo.toml
+[dependencies]
+jasonisnthappy = { version = "0.1.1", features = ["web-ui"] }
+```
+
+| Feature | Description | Default |
+|---------|-------------|----------|
+| `web-ui` | Built-in web interface and REST API | Enabled |
+
+<Info>
+  The `web-ui` feature includes the `tiny_http` dependency for serving the dashboard. Disable it with `default-features = false` if you don't need the web interface.
+</Info>
+
+### Platform support
+
+- **macOS**: ARM64 (Apple Silicon) and x86_64 (Intel)
+- **Linux**: ARM64 and x86_64
+- **Windows**: x86_64
+
+### Quick example
+
+```rust src/main.rs
+use jasonisnthappy::core::database::Database;
+use serde_json::json;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db = Database::open("mydb.db")?;
+
+    let mut tx = db.begin()?;
+    let mut users = tx.collection("users");
+
+    let user = json!({"name": "Alice", "age": 30});
+    let id = users.insert(user)?;
+
+    tx.commit()?;
+    db.close()?;
+
+    Ok(())
+}
+```
+
+## Go
+
+For Go projects, jasonisnthappy uses CGO to link against native libraries. The libraries are automatically downloaded during installation.
+
+<Steps>
+  <Step title="Install the package">
+    ```bash Terminal
+    go get github.com/sohzm/jasonisnthappy/bindings/go
+    ```
+  </Step>
+
+  <Step title="Download native libraries">
+    ```bash Terminal
+    go generate github.com/sohzm/jasonisnthappy/bindings/go
+    ```
+
+    This downloads the pre-compiled static library (`.a` file) from GitHub releases and caches it in `lib/<platform>/`.
+  </Step>
+
+  <Step title="Build your application">
+    ```bash Terminal
+    go build
+    ```
+
+    Your binary is now fully self-contained with no external dependencies!
+  </Step>
+</Steps>
+
+<Note>
+  CGO must be enabled (which is the default). The native library is statically linked into your binary, so you get a single standalone executable with zero runtime dependencies.
+</Note>
+
+### Requirements
+
+- **CGO enabled** (default on most systems)
+- **C compiler**:
+  - macOS: `xcode-select --install`
+  - Linux: `apt install build-essential` or `yum install gcc`
+  - Windows: Install MinGW-w64
+- Internet connection for first build (to download native library)
+
+### Platform support
+
+- **macOS**: ARM64 (Apple Silicon) and x86_64 (Intel)
+- **Linux**: ARM64 and x86_64  
+- **Windows**: x86_64
+
+<Warning>
+  Windows ARM64 is not currently supported.
+</Warning>
+
+### Quick example
+
+```go main.go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    db "github.com/sohzm/jasonisnthappy/bindings/go"
+)
+
+func main() {
+    // Open database
+    database, err := db.Open("./my_database.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer database.Close()
+
+    // Begin transaction
+    tx, err := database.BeginTransaction()
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer tx.Rollback() // Auto-rollback if not committed
+
+    // Insert document
+    doc := map[string]interface{}{
+        "name": "Alice",
+        "age":  30,
+        "email": "alice@example.com",
+    }
+    id, err := tx.Insert("users", doc)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Inserted document with ID: %s\n", id)
+
+    // Commit transaction
+    err = tx.Commit()
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+### API reference
+
+See the [Go bindings README](https://github.com/sohzm/jasonisnthappy/blob/main/bindings/go/README.md) for complete API documentation including:
+
+- `Database.Open(path string) (*Database, error)` - Open a database at path
+- `Database.BeginTransaction() (*Transaction, error)` - Start a new transaction
+- `Transaction.Insert(collection string, doc interface{}) (string, error)` - Insert document
+- `Transaction.FindByID(collection, id string, result interface{}) (bool, error)` - Find by ID
+- `Transaction.UpdateByID(collection, id string, doc interface{}) error` - Update document
+- `Transaction.DeleteByID(collection, id string) error` - Delete document
+- `Transaction.Commit() error` - Commit changes
+- `Transaction.Rollback()` - Rollback changes
+
+## Python
+
+For Python projects, install jasonisnthappy via pip. The package automatically downloads the native library for your platform.
+
+```bash Terminal
+pip install jasonisnthappy
+```
+
+### Platform support
+
+- **macOS**: Intel and Apple Silicon
+- **Linux**: x86_64
+- **Windows**: x86_64
+
+Pre-built binaries are provided for all supported platforms and are automatically downloaded from [GitHub releases](https://github.com/sohzm/jasonisnthappy/releases).
+
+### Quick example
+
+```python main.py
+from jasonisnthappy import Database
+
+# Open database
+db = Database.open("./my_database.db")
+
+try:
+    # Begin transaction
+    tx = db.begin_transaction()
+
+    try:
+        # Get collection
+        users = tx.collection("users")
+
+        # Insert document
+        doc_id = users.insert({
+            "name": "Alice",
+            "age": 30,
+            "email": "alice@example.com"
+        })
+        print(f"Inserted document with ID: {doc_id}")
+
+        # Find by ID
+        user = users.find_by_id(doc_id)
+        print(f"Found: {user}")
+
+        # Commit transaction
+        tx.commit()
+    except Exception as e:
+        # Rollback on error
+        tx.rollback()
+        raise
+finally:
+    db.close()
+```
+
+### Using context managers
+
+Python bindings support context managers for automatic resource cleanup:
+
+```python main.py
+from jasonisnthappy import Database
+
+with Database.open("./my_database.db") as db:
+    with db.begin_transaction() as tx:
+        users = tx.collection("users")
+
+        doc_id = users.insert({"name": "Alice", "age": 30})
+        user = users.find_by_id(doc_id)
+        print(user)
+
+        # Transaction is automatically committed if no exception occurs
+        # or rolled back if an exception is raised
+```
+
+<Tip>
+  Using context managers is the recommended approach as it ensures proper resource cleanup even if errors occur.
+</Tip>
+
+### Type hints
+
+The library includes full type hints for better IDE support:
+
+```python main.py
+from typing import Dict, Any, List
+from jasonisnthappy import Database, Transaction, Collection
+
+db: Database = Database.open("./my_database.db")
+tx: Transaction = db.begin_transaction()
+users: Collection = tx.collection("users")
+
+doc: Dict[str, Any] = {"name": "Alice", "age": 30}
+doc_id: int = users.insert(doc)
+
+result: Dict[str, Any] | None = users.find_by_id(doc_id)
+results: List[Dict[str, Any]] = users.query("age > 25")
+```
+
+### API reference
+
+Key classes and methods:
+
+- `Database.open(path: str) -> Database` - Open a database
+- `Database.close() -> None` - Close the database
+- `Database.begin_transaction() -> Transaction` - Begin a transaction
+- `Transaction.commit() -> None` - Commit the transaction
+- `Transaction.rollback() -> None` - Rollback the transaction
+- `Transaction.collection(name: str) -> Collection` - Get or create a collection
+- `Collection.insert(doc: Dict[str, Any]) -> int` - Insert a document
+- `Collection.find_by_id(doc_id: int) -> Dict[str, Any] | None` - Find by ID
+- `Collection.update(doc_id: int, doc: Dict[str, Any]) -> None` - Update document
+- `Collection.delete(doc_id: int) -> None` - Delete document
+- `Collection.query(query_str: str) -> List[Dict[str, Any]]` - Execute a query
+
+## JavaScript (Node.js, Deno, Bun)
+
+For JavaScript projects, jasonisnthappy is available as an npm package with TypeScript type definitions included.
+
+<Tabs>
+  <Tab title="npm">
+    ```bash Terminal
+    npm install @sohzm/jasonisnthappy
+    ```
+  </Tab>
+  <Tab title="yarn">
+    ```bash Terminal
+    yarn add @sohzm/jasonisnthappy
+    ```
+  </Tab>
+  <Tab title="pnpm">
+    ```bash Terminal
+    pnpm add @sohzm/jasonisnthappy
+    ```
+  </Tab>
+</Tabs>
+
+The native library is automatically downloaded during the `postinstall` step from GitHub releases.
+
+### Requirements
+
+- **Node.js**: 14 or later
+- **Deno**: Supported (use npm: specifier)
+- **Bun**: Supported
+
+### Platform support
+
+- **macOS**: ARM64 (Apple Silicon) and x86_64 (Intel)
+- **Linux**: ARM64 and x86_64
+- **Windows**: x86_64
+
+### Quick example (CommonJS)
+
+```javascript index.js
+const { Database } = require('@sohzm/jasonisnthappy');
+
+// Open database
+const db = Database.open('./my_database.db');
+
+// Begin transaction
+const tx = db.beginTransaction();
+
+try {
+  // Insert document
+  const id = tx.insert('users', {
+    name: 'Alice',
+    age: 30,
+    email: 'alice@example.com'
+  });
+  console.log(`Inserted document with ID: ${id}`);
+
+  // Find by ID
+  const user = tx.findById('users', id);
+  console.log('Found:', user);
+
+  // Update
+  tx.updateById('users', id, { age: 31 });
+
+  // Commit transaction
+  tx.commit();
+} catch (error) {
+  tx.rollback();
+  throw error;
+} finally {
+  db.close();
+}
+```
+
+### Quick example (ES modules)
+
+```javascript index.mjs
+import { Database } from '@sohzm/jasonisnthappy';
+
+const db = Database.open('./my_database.db');
+const tx = db.beginTransaction();
+
+try {
+  const id = tx.insert('users', { name: 'Alice', age: 30 });
+  const user = tx.findById('users', id);
+  console.log('User:', user);
+
+  tx.commit();
+} catch (error) {
+  tx.rollback();
+  throw error;
+} finally {
+  db.close();
+}
+```
+
+### TypeScript support
+
+Full TypeScript definitions are included. Use generics for type-safe operations:
+
+```typescript index.ts
+import { Database, Collection, Document } from '@sohzm/jasonisnthappy';
+
+interface User extends Document {
+  name: string;
+  age: number;
+  email: string;
+}
+
+const db = Database.open('./my_database.db');
+const users: Collection<User> = db.getCollection<User>('users');
+
+// Type-safe insert (no _id needed)
+const id = users.insert({
+  name: 'Alice',
+  age: 30,
+  email: 'alice@example.com'
+});
+
+// Type-safe query
+const user: User | null = users.findById(id);
+if (user) {
+  console.log(user.name); // TypeScript knows this is a string
+}
+
+db.close();
+```
+
+### API reference
+
+Key classes and methods from `index.d.ts:175-253`:
+
+- `Database.open(path: string): Database` - Open a database
+- `Database.close(): void` - Close the database
+- `Database.beginTransaction(): Transaction` - Start a transaction
+- `Database.getCollection<T>(name: string): Collection<T>` - Get a typed collection
+- `Transaction.insert<T>(collection: string, doc: Omit<T, '_id'>): string` - Insert document
+- `Transaction.findById<T>(collection: string, id: string): T | null` - Find by ID
+- `Transaction.commit(): void` - Commit changes
+- `Transaction.rollback(): void` - Rollback changes
+- `Collection<T>.insert(doc: Omit<T, '_id'>): string` - Insert document
+- `Collection<T>.findById(id: string): T | null` - Find by ID
+- `Collection<T>.find(filter: string): T[]` - Query documents
+- `Collection<T>.updateById(id: string, updates: Partial<T>): void` - Update document
+- `Collection<T>.deleteById(id: string): void` - Delete document
+
+## Building from source
+
+If you need to build the native libraries yourself, clone the repository and use the provided build scripts:
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash Terminal
+    git clone https://github.com/sohzm/jasonisnthappy.git
+    cd jasonisnthappy
+    ```
+  </Step>
+
+  <Step title="Quick build (macOS only)">
+    For local testing on macOS:
+
+    ```bash Terminal
+    ./scripts/build-simple.sh
+    ```
+  </Step>
+
+  <Step title="Full build (all platforms)">
+    Requires Docker for cross-compilation:
+
+    ```bash Terminal
+    ./scripts/build.sh
+    ```
+
+    This builds for:
+    - macOS ARM64 and x86_64
+    - Linux ARM64 and x86_64
+    - Windows x86_64
+
+    Output files are placed in `builds/` directory.
+  </Step>
+</Steps>
+
+<Info>
+  The build scripts use Docker containers with the official `rust:1.83` image and cross-compilation tools. See [bindings/README.md](https://github.com/sohzm/jasonisnthappy/blob/main/bindings/README.md) for architecture details.
+</Info>
+
+## Troubleshooting
+
+### Go: CGO errors
+
+If you encounter CGO-related errors, ensure you have a C compiler installed:
+
+- **macOS**: `xcode-select --install`
+- **Linux**: `apt install build-essential` or `yum install gcc`
+- **Windows**: Install MinGW-w64
+
+### Go: Library download fails
+
+- Ensure you have internet connectivity
+- Check that the [GitHub release](https://github.com/sohzm/jasonisnthappy/releases) exists with the required files
+- Verify your platform is supported (run `go env GOOS GOARCH`)
+
+### Python: Library not found
+
+If the native library is not found, manually download it from the [releases page](https://github.com/sohzm/jasonisnthappy/releases) and place it in the appropriate `lib/` directory for your platform.
+
+### JavaScript: Platform not supported
+
+The error indicates your platform is not supported. Currently supported:
+- macOS: darwin-arm64, darwin-amd64
+- Linux: linux-arm64, linux-amd64
+- Windows: windows-amd64
+
+### Database file corruption
+
+If you suspect database corruption, jasonisnthappy includes built-in corruption detection in the LRU page cache. You can verify a backup file using:
+
+```rust
+use jasonisnthappy::Database;
+
+let backup_info = Database::verify_backup("backup.db")?;
+println!("Backup version: {}", backup_info.version);
+println!("Collections: {:?}", backup_info.collections);
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running with a working example
+  </Card>
+  <Card title="Core concepts" icon="book" href="/concepts/architecture">
+    Learn about transactions, collections, and MVCC
+  </Card>
+  <Card title="API reference" icon="code" href="/api/rust/database">
+    Explore the complete API documentation
+  </Card>
+  <Card title="Examples" icon="code-branch" href="https://github.com/sohzm/jasonisnthappy/tree/main/examples">
+    Browse more examples in the repository
+  </Card>
+</CardGroup>

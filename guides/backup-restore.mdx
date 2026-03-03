@@ -1,0 +1,524 @@
+---
+title: Backup and restore
+description: Create point-in-time backups and restore your database safely
+---
+
+Jasonisnthappy provides built-in backup and restore capabilities with atomic operations and verification.
+
+## Creating backups
+
+### Basic backup
+
+Create a backup of your database.
+
+```rust
+use jasonisnthappy::Database;
+
+let db = Database::open("my.db")?;
+
+// Create a backup
+db.backup("./backups/my-backup.db")?;
+
+println!("Backup created successfully!");
+```
+
+<Note>
+Backups are created atomically - the backup file is written to a temporary location and renamed only when complete.
+</Note>
+
+### Backup process
+
+What happens during a backup:
+
+<Steps>
+
+### Checkpoint WAL
+
+All pending writes in the WAL are flushed to the main database file.
+
+```rust
+db.checkpoint()?;  // Called automatically by backup()
+```
+
+### Copy database file
+
+The main database file is copied to the backup destination.
+
+### Verify backup
+
+File size is compared to ensure complete copy.
+
+### Atomic rename
+
+Temporary backup file is renamed to final destination.
+
+</Steps>
+
+<Tip>
+Backups include a consistent snapshot of your data at the time the backup started.
+</Tip>
+
+## Backup strategies
+
+### Manual backups
+
+Create backups on demand.
+
+```rust
+use chrono::Utc;
+
+let db = Database::open("production.db")?;
+
+// Create timestamped backup
+let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+let backup_path = format!("./backups/db_{}.db", timestamp);
+
+db.backup(&backup_path)?;
+println!("Backup saved to {}", backup_path);
+```
+
+### Scheduled backups
+
+Automate backups with a background thread.
+
+```rust
+use std::thread;
+use std::time::Duration;
+
+let db = Database::open("app.db")?;
+let db_clone = db.clone();  // Clone for thread
+
+// Backup every hour
+thread::spawn(move || {
+    loop {
+        thread::sleep(Duration::from_secs(3600));
+        
+        let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+        let backup_path = format!("./backups/auto_{}.db", timestamp);
+        
+        match db_clone.backup(&backup_path) {
+            Ok(_) => println!("Auto backup created: {}", backup_path),
+            Err(e) => eprintln!("Backup failed: {}", e),
+        }
+    }
+});
+```
+
+### Incremental backups
+
+For frequent backups, copy only the WAL file.
+
+```rust
+use std::fs;
+
+// Full backup (daily)
+db.backup("./backups/daily/full_backup.db")?;
+
+// Incremental backup (hourly) - copy WAL only
+fs::copy("app.db-wal", "./backups/hourly/wal_backup")?;
+
+// To restore: use full backup + apply WAL
+```
+
+<Warning>
+Incremental backups require careful WAL management. For simplicity, prefer full backups.
+</Warning>
+
+## Verifying backups
+
+### Verify backup integrity
+
+Check that a backup file is valid.
+
+```rust
+use jasonisnthappy::Database;
+
+// Verify backup by opening it read-only
+let backup_info = Database::verify_backup("./backups/my-backup.db")?;
+
+println!("Backup verification:");
+println!("  Version: {}", backup_info.version);
+println!("  Pages: {}", backup_info.num_pages);
+println!("  Collections: {}", backup_info.num_collections);
+println!("  File size: {} bytes", backup_info.file_size);
+```
+
+### Test backup restoration
+
+Periodically test that backups can be restored.
+
+```rust
+use std::fs;
+
+// Test restore to temporary location
+fs::copy("./backups/latest.db", "./test-restore.db")?;
+
+let test_db = Database::open("./test-restore.db")?;
+let info = test_db.info()?;
+
+println!("Restored database info:");
+println!("  Collections: {}", info.collections.len());
+println!("  Total documents: {}", info.total_documents);
+
+// Cleanup
+test_db.close()?;
+fs::remove_file("./test-restore.db")?;
+```
+
+## Restoring from backup
+
+### Full restore
+
+Restore a database from a backup file.
+
+<Steps>
+
+### Close the current database
+
+```rust
+let db = Database::open("app.db")?;
+// ... use database ...
+db.close()?;
+```
+
+### Replace database file
+
+```rust
+use std::fs;
+
+// Backup current database (optional but recommended)
+fs::copy("app.db", "app.db.old")?;
+
+// Restore from backup
+fs::copy("./backups/good-backup.db", "app.db")?;
+
+// Remove WAL file (important!)
+fs::remove_file("app.db-wal").ok();
+```
+
+### Reopen database
+
+```rust
+let db = Database::open("app.db")?;
+println!("Database restored!");
+```
+
+</Steps>
+
+<Warning>
+**Important:** Always remove the WAL file when restoring from a backup, or open the database to checkpoint it before use.
+</Warning>
+
+### Partial restore
+
+Restore specific collections from a backup.
+
+```rust
+use serde_json::json;
+
+// Open backup read-only
+let backup = Database::open_with_options(
+    "./backups/backup.db",
+    DatabaseOptions {
+        read_only: true,
+        ..Default::default()
+    }
+)?;
+
+// Open current database for writing
+let db = Database::open("app.db")?;
+
+// Copy specific collection
+let backup_users = backup.collection("users");
+let current_users = db.collection("users");
+
+let all_users = backup_users.find_all()?;
+for user in all_users {
+    current_users.insert(user)?;
+}
+
+println!("Users collection restored");
+```
+
+## Backup best practices
+
+### Storage location
+
+<Tip>
+**Store backups separately from your database:**
+
+```rust
+// Good: separate directory
+db.backup("/mnt/backups/myapp/backup.db")?;
+
+// Good: different disk/server
+db.backup("/backup-drive/myapp/backup.db")?;
+
+// Bad: same directory as database
+db.backup("./backup.db")?;
+```
+</Tip>
+
+### Backup retention
+
+Keep multiple backup generations.
+
+```rust
+use std::fs;
+use std::path::Path;
+
+// Keep last 7 daily backups
+const KEEP_BACKUPS: usize = 7;
+
+let backup_dir = Path::new("./backups");
+let mut backups: Vec<_> = fs::read_dir(backup_dir)?
+    .filter_map(|e| e.ok())
+    .filter(|e| e.path().extension() == Some("db".as_ref()))
+    .collect();
+
+// Sort by modification time
+backups.sort_by_key(|e| e.metadata().unwrap().modified().unwrap());
+
+// Remove old backups
+if backups.len() > KEEP_BACKUPS {
+    for old_backup in &backups[..backups.len() - KEEP_BACKUPS] {
+        fs::remove_file(old_backup.path())?;
+    }
+}
+
+// Create new backup
+let timestamp = Utc::now().format("%Y%m%d");
+db.backup(&format!("./backups/backup_{}.db", timestamp))?;
+```
+
+### Backup naming
+
+<Tip>
+Use descriptive, timestamped names:
+
+```rust
+// Good: includes timestamp and type
+let name = format!("myapp_full_{}.db", Utc::now().format("%Y%m%d_%H%M%S"));
+db.backup(&format!("./backups/{}", name))?;
+
+// Good: includes version/environment
+db.backup("./backups/production_v2.1.0_20240115.db")?;
+
+// Bad: overwritten on each backup
+db.backup("./backups/backup.db")?;
+```
+</Tip>
+
+## Backup automation example
+
+Complete backup system with rotation.
+
+```rust
+use jasonisnthappy::{Database, DatabaseOptions};
+use std::fs;
+use std::path::{Path, PathBuf};
+use chrono::Utc;
+
+struct BackupManager {
+    db: Database,
+    backup_dir: PathBuf,
+    max_backups: usize,
+}
+
+impl BackupManager {
+    pub fn new(db_path: &str, backup_dir: &str, max_backups: usize) -> Result<Self, Box<dyn std::error::Error>> {
+        let db = Database::open(db_path)?;
+        let backup_dir = PathBuf::from(backup_dir);
+        
+        // Create backup directory if it doesn't exist
+        fs::create_dir_all(&backup_dir)?;
+        
+        Ok(Self {
+            db,
+            backup_dir,
+            max_backups,
+        })
+    }
+    
+    pub fn create_backup(&self) -> Result<String, Box<dyn std::error::Error>> {
+        // Generate backup filename
+        let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
+        let backup_name = format!("backup_{}.db", timestamp);
+        let backup_path = self.backup_dir.join(&backup_name);
+        
+        // Create backup
+        self.db.backup(backup_path.to_str().unwrap())?;
+        
+        // Rotate old backups
+        self.rotate_backups()?;
+        
+        Ok(backup_name)
+    }
+    
+    fn rotate_backups(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut backups: Vec<_> = fs::read_dir(&self.backup_dir)?
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .and_then(|s| s.to_str())
+                    == Some("db")
+            })
+            .collect();
+        
+        // Sort by modification time (oldest first)
+        backups.sort_by_key(|e| {
+            e.metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        });
+        
+        // Remove old backups
+        if backups.len() > self.max_backups {
+            let to_remove = backups.len() - self.max_backups;
+            for old_backup in &backups[..to_remove] {
+                fs::remove_file(old_backup.path())?;
+                println!("Removed old backup: {:?}", old_backup.file_name());
+            }
+        }
+        
+        Ok(())
+    }
+    
+    pub fn list_backups(&self) -> Result<Vec<String>, Box<dyn std::error::Error>> {
+        let backups: Vec<String> = fs::read_dir(&self.backup_dir)?
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                e.file_name().to_str().map(|s| s.to_string())
+            })
+            .collect();
+        
+        Ok(backups)
+    }
+}
+
+// Usage
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let backup_mgr = BackupManager::new(
+        "app.db",
+        "./backups",
+        7  // Keep 7 backups
+    )?;
+    
+    // Create backup
+    let backup_name = backup_mgr.create_backup()?;
+    println!("Created backup: {}", backup_name);
+    
+    // List all backups
+    let backups = backup_mgr.list_backups()?;
+    println!("Available backups: {:?}", backups);
+    
+    Ok(())
+}
+```
+
+## Disaster recovery
+
+### Recovery checklist
+
+<Steps>
+
+### Identify the problem
+
+Determine if data corruption or loss has occurred.
+
+### Stop the application
+
+Prevent further writes to the corrupted database.
+
+### Find latest good backup
+
+Verify backup integrity before restoring.
+
+```rust
+let backup_info = Database::verify_backup("./backups/latest.db")?;
+println!("Backup verified: {} collections", backup_info.num_collections);
+```
+
+### Restore from backup
+
+Replace corrupted database with backup.
+
+```rust
+fs::copy("./backups/latest.db", "app.db")?;
+fs::remove_file("app.db-wal").ok();
+```
+
+### Verify restoration
+
+Open database and check data.
+
+```rust
+let db = Database::open("app.db")?;
+let info = db.info()?;
+println!("Restored: {} documents", info.total_documents);
+```
+
+### Resume operations
+
+Restart application with restored database.
+
+</Steps>
+
+### Point-in-time recovery
+
+Recover to a specific point in time using WAL.
+
+```rust
+// 1. Start with base backup
+fs::copy("./backups/base.db", "restored.db")?;
+
+// 2. Apply WAL up to desired point
+// (Requires saved WAL files - advanced topic)
+
+// 3. Open restored database
+let db = Database::open("restored.db")?;
+```
+
+<Note>
+Point-in-time recovery requires saving WAL files separately. For most use cases, regular full backups are sufficient.
+</Note>
+
+## Performance impact
+
+### Backup performance
+
+Backup speed depends on database size:
+
+| Database size | Backup time |
+|--------------|-------------|
+| 10 MB | < 0.1s |
+| 100 MB | ~0.5s |
+| 1 GB | ~5s |
+| 10 GB | ~50s |
+
+*Times are approximate on SSD*
+
+<Tip>
+**Minimize impact on production:**
+- Schedule backups during low-traffic periods
+- Use read-only replica for backups (if available)
+- Monitor backup duration and adjust frequency
+</Tip>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Performance" icon="gauge-high" href="/guides/performance">
+    Optimize database performance
+  </Card>
+  <Card title="CRUD operations" icon="database" href="/guides/crud-operations">
+    Operations that affect backup content
+  </Card>
+  <Card title="Indexes" icon="bolt" href="/guides/indexes">
+    Indexes are included in backups
+  </Card>
+  <Card title="Schema validation" icon="shield-check" href="/guides/schema-validation">
+    Schemas are included in backups
+  </Card>
+</CardGroup>

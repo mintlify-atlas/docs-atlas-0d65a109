@@ -1,0 +1,471 @@
+---
+title: Document commands
+description: Insert, query, update, and delete documents with the jasonisnthappy CLI
+---
+
+Document commands provide CRUD operations for working with individual documents in collections.
+
+## doc insert
+
+Insert a new document into a collection. Auto-generates an ID if not provided.
+
+```bash
+jasonisnthappy <DATABASE> doc insert <COLLECTION> <DOCUMENT>
+```
+
+### Arguments
+
+- `collection` - Name of the collection (created automatically if it doesn't exist)
+- `document` - JSON document to insert
+
+### Examples
+
+<CodeGroup>
+```bash Simple document
+jasonisnthappy mydb.db doc insert users '{"name":"Alice","age":30}'
+```
+
+```bash With nested fields
+jasonisnthappy mydb.db doc insert users '{
+  "name": "Bob",
+  "email": "bob@example.com",
+  "profile": {
+    "age": 25,
+    "city": "New York"
+  }
+}'
+```
+
+```bash With custom ID
+jasonisnthappy mydb.db doc insert users '{"_id":100,"name":"Charlie"}'
+```
+</CodeGroup>
+
+### Output
+
+```
+✓ Document inserted
+  Collection: users
+  ID: 1
+```
+
+<Tip>
+If the collection doesn't exist, it will be created automatically on first insert.
+</Tip>
+
+## doc find
+
+Find documents matching a query filter. Returns all matching documents.
+
+```bash
+jasonisnthappy <DATABASE> doc find <COLLECTION> [QUERY] [--limit N] [--skip N]
+```
+
+### Arguments
+
+- `collection` - Name of the collection to query
+- `query` - JSON query filter (default: `{}` returns all documents)
+
+### Flags
+
+- `--limit` / `-l` - Maximum number of documents to return
+- `--skip` / `-s` - Number of documents to skip (for pagination)
+
+### Examples
+
+<CodeGroup>
+```bash Find all documents
+jasonisnthappy mydb.db doc find users
+```
+
+```bash Simple equality
+jasonisnthappy mydb.db doc find users '{"name":"Alice"}'
+```
+
+```bash Comparison operators
+jasonisnthappy mydb.db doc find users '{"age":{"$gte":25}}'
+```
+
+```bash With pagination
+jasonisnthappy mydb.db doc find users '{}' --limit 10 --skip 20
+```
+
+```bash Nested fields
+jasonisnthappy mydb.db doc find users '{"profile.city":"New York"}'
+```
+
+```bash Multiple conditions
+jasonisnthappy mydb.db doc find users '{"age":{"$gte":25,"$lt":40}}'
+```
+</CodeGroup>
+
+### Query operators
+
+The CLI supports all jasonisnthappy query operators:
+
+| Operator | Description | Example |
+|----------|-------------|----------|
+| `$eq` | Equal to | `{"age":{"$eq":30}}` |
+| `$ne` | Not equal to | `{"status":{"$ne":"inactive"}}` |
+| `$gt` | Greater than | `{"age":{"$gt":25}}` |
+| `$gte` | Greater than or equal | `{"age":{"$gte":25}}` |
+| `$lt` | Less than | `{"age":{"$lt":40}}` |
+| `$lte` | Less than or equal | `{"age":{"$lte":40}}` |
+| `$in` | In array | `{"status":{"$in":["active","pending"]}}` |
+| `$nin` | Not in array | `{"role":{"$nin":["guest","banned"]}}` |
+| `$and` | Logical AND | `{"$and":[{"age":{"$gte":25}},{"city":"NYC"}]}` |
+| `$or` | Logical OR | `{"$or":[{"age":{"$lt":18}},{"age":{"$gte":65}}]}` |
+| `$not` | Logical NOT | `{"$not":{"status":"inactive"}}` |
+
+### Output
+
+<Tabs>
+  <Tab title="pretty">
+    ```
+    Found 2 documents:
+    
+    Document ID: 1
+    {
+      "name": "Alice",
+      "age": 30,
+      "email": "alice@example.com"
+    }
+    
+    Document ID: 2
+    {
+      "name": "Bob",
+      "age": 28,
+      "email": "bob@example.com"
+    }
+    ```
+  </Tab>
+  
+  <Tab title="json">
+    ```json
+    [
+      {"_id":1,"name":"Alice","age":30,"email":"alice@example.com"},
+      {"_id":2,"name":"Bob","age":28,"email":"bob@example.com"}
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+The default query `{}` matches all documents. Omit the query parameter to find all documents.
+</Note>
+
+## doc find-one
+
+Find a single document matching the query. Returns only the first match.
+
+```bash
+jasonisnthappy <DATABASE> doc find-one <COLLECTION> <QUERY>
+```
+
+### Arguments
+
+- `collection` - Name of the collection
+- `query` - JSON query filter
+
+### Example
+
+```bash
+jasonisnthappy mydb.db doc find-one users '{"email":"alice@example.com"}'
+```
+
+### Output
+
+```json
+{
+  "_id": 1,
+  "name": "Alice",
+  "age": 30,
+  "email": "alice@example.com"
+}
+```
+
+## doc update
+
+Update documents matching a query filter.
+
+```bash
+jasonisnthappy <DATABASE> doc update <COLLECTION> <QUERY> <UPDATE>
+```
+
+### Arguments
+
+- `collection` - Name of the collection
+- `query` - JSON query filter (selects which documents to update)
+- `update` - JSON update operations
+
+### Update operators
+
+| Operator | Description | Example |
+|----------|-------------|----------|
+| `$set` | Set field values | `{"$set":{"age":31}}` |
+| `$unset` | Remove fields | `{"$unset":{"temp_field":""}}` |
+| `$inc` | Increment number | `{"$inc":{"views":1}}` |
+| `$push` | Add to array | `{"$push":{"tags":"new"}}` |
+| `$pull` | Remove from array | `{"$pull":{"tags":"old"}}` |
+
+### Examples
+
+<CodeGroup>
+```bash Set fields
+jasonisnthappy mydb.db doc update users \
+  '{"name":"Alice"}' \
+  '{"$set":{"age":31,"city":"Boston"}}'
+```
+
+```bash Increment counter
+jasonisnthappy mydb.db doc update users \
+  '{"_id":1}' \
+  '{"$inc":{"login_count":1}}'
+```
+
+```bash Remove field
+jasonisnthappy mydb.db doc update users \
+  '{"status":"temp"}' \
+  '{"$unset":{"temp_data":""}}'
+```
+
+```bash Update multiple fields
+jasonisnthappy mydb.db doc update users \
+  '{"age":{"$lt":18}}' \
+  '{"$set":{"status":"minor","verified":false}}'
+```
+</CodeGroup>
+
+### Output
+
+```
+✓ Documents updated
+  Collection: users
+  Matched: 3
+  Modified: 3
+```
+
+<Note>
+Updates affect all documents matching the query. Use `doc find` first to preview which documents will be updated.
+</Note>
+
+## doc delete
+
+Delete documents matching a query filter.
+
+```bash
+jasonisnthappy <DATABASE> doc delete <COLLECTION> <QUERY>
+```
+
+### Arguments
+
+- `collection` - Name of the collection
+- `query` - JSON query filter (selects which documents to delete)
+
+### Examples
+
+<CodeGroup>
+```bash Delete by ID
+jasonisnthappy mydb.db doc delete users '{"_id":1}'
+```
+
+```bash Delete by condition
+jasonisnthappy mydb.db doc delete users '{"status":"inactive"}'
+```
+
+```bash Delete multiple
+jasonisnthappy mydb.db doc delete logs '{"created_at":{"$lt":"2025-01-01"}}'
+```
+</CodeGroup>
+
+### Output
+
+```
+✓ Documents deleted
+  Collection: users
+  Deleted: 5
+```
+
+<Warning>
+Deletes are permanent and cannot be undone. Use `doc find` to preview which documents will be deleted before running the delete command.
+</Warning>
+
+## doc count
+
+Count documents matching a query filter.
+
+```bash
+jasonisnthappy <DATABASE> doc count <COLLECTION> [QUERY]
+```
+
+### Arguments
+
+- `collection` - Name of the collection
+- `query` - JSON query filter (default: `{}` counts all documents)
+
+### Examples
+
+<CodeGroup>
+```bash Count all documents
+jasonisnthappy mydb.db doc count users
+```
+
+```bash Count with filter
+jasonisnthappy mydb.db doc count users '{"age":{"$gte":25}}'
+```
+
+```bash Count by status
+jasonisnthappy mydb.db doc count orders '{"status":"completed"}'
+```
+</CodeGroup>
+
+### Output
+
+```
+Count: 1,234 documents
+```
+
+## query run
+
+Run an advanced query with filtering, sorting, and pagination.
+
+```bash
+jasonisnthappy <DATABASE> query run <COLLECTION> [OPTIONS]
+```
+
+### Flags
+
+- `--filter` / `-f` - Query filter as JSON (default: `{}`)
+- `--sort` / `-s` - Field to sort by
+- `--order` - Sort order: `asc` or `desc` (default: `asc`)
+- `--limit` / `-l` - Maximum number of results
+- `--skip` - Number of results to skip
+
+### Examples
+
+<CodeGroup>
+```bash Sort by age ascending
+jasonisnthappy mydb.db query run users --sort age --order asc
+```
+
+```bash Filter and sort
+jasonisnthappy mydb.db query run users \
+  --filter '{"status":"active"}' \
+  --sort created_at \
+  --order desc \
+  --limit 10
+```
+
+```bash Pagination
+jasonisnthappy mydb.db query run users \
+  --sort name \
+  --limit 20 \
+  --skip 40
+```
+</CodeGroup>
+
+### Output
+
+```json
+[
+  {"_id":5,"name":"Alice","age":25},
+  {"_id":3,"name":"Bob","age":28},
+  {"_id":1,"name":"Charlie","age":30}
+]
+```
+
+## query aggregate
+
+Run an aggregation pipeline for complex data transformations.
+
+```bash
+jasonisnthappy <DATABASE> query aggregate <COLLECTION> <PIPELINE>
+```
+
+### Arguments
+
+- `collection` - Name of the collection
+- `pipeline` - Aggregation pipeline as JSON array
+
+### Example
+
+```bash
+jasonisnthappy mydb.db query aggregate users '[
+  {"$match": {"age": {"$gte": 25}}},
+  {"$group": {
+    "_id": "$city",
+    "count": {"$sum": 1},
+    "avg_age": {"$avg": "$age"}
+  }},
+  {"$sort": {"count": -1}}
+]'
+```
+
+### Output
+
+```json
+[
+  {"_id":"New York","count":45,"avg_age":32.5},
+  {"_id":"Boston","count":23,"avg_age":29.8},
+  {"_id":"Chicago","count":18,"avg_age":31.2}
+]
+```
+
+## query search
+
+Perform full-text search with TF-IDF scoring.
+
+```bash
+jasonisnthappy <DATABASE> query search <COLLECTION> <TEXT> [--limit N]
+```
+
+### Arguments
+
+- `collection` - Name of the collection
+- `text` - Search text
+
+### Flags
+
+- `--limit` / `-l` - Maximum number of results
+
+### Example
+
+```bash
+jasonisnthappy mydb.db query search products "wireless headphones" --limit 5
+```
+
+### Output
+
+```
+Search results for 'wireless headphones':
+
+[1] Score: 0.87
+{
+  "_id": 42,
+  "name": "Premium Wireless Headphones",
+  "description": "Bluetooth wireless headphones with noise cancellation"
+}
+
+[2] Score: 0.65
+{
+  "_id": 108,
+  "name": "Budget Wireless Earbuds",
+  "description": "Affordable wireless earbuds for everyday use"
+}
+```
+
+<Tip>
+Full-text search requires indexed text fields. Results are ranked by relevance using TF-IDF scoring.
+</Tip>
+
+## Related commands
+
+<CardGroup cols={2}>
+  <Card title="Collection commands" icon="folder" href="/cli/collection-commands">
+    Manage collections and schemas
+  </Card>
+  
+  <Card title="Interactive REPL" icon="terminal" href="/cli/repl">
+    Work with documents interactively
+  </Card>
+</CardGroup>

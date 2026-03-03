@@ -1,0 +1,357 @@
+---
+title: Query builder
+description: Advanced query API with filtering, sorting, and pagination
+---
+
+The `QueryBuilder` provides a fluent API for constructing complex queries with filtering, sorting, pagination, and field projection.
+
+## Creating a query
+
+Get a query builder from a collection:
+
+```rust
+let users = db.collection("users");
+let query = users.query();
+```
+
+## Filtering
+
+### `filter`
+
+Filter documents using a query string.
+
+```rust
+pub fn filter(self, query: &str) -> Self
+```
+
+<ParamField path="query" type="&str" required>
+  Query string (e.g., "age > 25 and city is \"NYC\"")
+</ParamField>
+
+**Example:**
+```rust
+let results = users.query()
+    .filter("age >= 18 and city is \"New York\"")
+    .execute()?;
+```
+
+## Sorting
+
+### `sort_by`
+
+Sort results by a field.
+
+```rust
+pub fn sort_by(self, field: &str, order: SortOrder) -> Self
+```
+
+<ParamField path="field" type="&str" required>
+  Field name (supports nested fields with dot notation)
+</ParamField>
+
+<ParamField path="order" type="SortOrder" required>
+  Sort order (SortOrder::Asc or SortOrder::Desc)
+</ParamField>
+
+**Example:**
+```rust
+use jasonisnthappy::SortOrder;
+
+// Sort by age ascending
+let results = users.query()
+    .sort_by("age", SortOrder::Asc)
+    .execute()?;
+
+// Sort by multiple fields
+let results = users.query()
+    .sort_by("city", SortOrder::Asc)
+    .sort_by("age", SortOrder::Desc)
+    .execute()?;
+```
+
+### SortOrder
+
+<ParamField path="SortOrder::Asc" type="enum variant">
+  Sort in ascending order
+</ParamField>
+
+<ParamField path="SortOrder::Desc" type="enum variant">
+  Sort in descending order
+</ParamField>
+
+## Pagination
+
+### `limit`
+
+Limit the number of results.
+
+```rust
+pub fn limit(self, n: usize) -> Self
+```
+
+<ParamField path="n" type="usize" required>
+  Maximum number of results to return
+</ParamField>
+
+**Example:**
+```rust
+// Get first 10 users
+let results = users.query()
+    .limit(10)
+    .execute()?;
+```
+
+---
+
+### `skip`
+
+Skip the first N results.
+
+```rust
+pub fn skip(self, n: usize) -> Self
+```
+
+<ParamField path="n" type="usize" required>
+  Number of results to skip
+</ParamField>
+
+**Example:**
+```rust
+// Get page 2 (results 11-20)
+let results = users.query()
+    .sort_by("name", SortOrder::Asc)
+    .skip(10)
+    .limit(10)
+    .execute()?;
+```
+
+## Field projection
+
+### `project`
+
+Include only specified fields in results.
+
+```rust
+pub fn project(self, fields: &[&str]) -> Self
+```
+
+<ParamField path="fields" type="&[&str]" required>
+  Array of field names to include
+</ParamField>
+
+**Example:**
+```rust
+// Get only name and email fields
+let results = users.query()
+    .project(&["name", "email"])
+    .execute()?;
+
+// _id is always included unless explicitly excluded
+// Supports nested fields
+let results = users.query()
+    .project(&["name", "address.city"])
+    .execute()?;
+```
+
+---
+
+### `exclude`
+
+Exclude specified fields from results.
+
+```rust
+pub fn exclude(self, fields: &[&str]) -> Self
+```
+
+<ParamField path="fields" type="&[&str]" required>
+  Array of field names to exclude
+</ParamField>
+
+**Example:**
+```rust
+// Get all fields except password and secret
+let results = users.query()
+    .exclude(&["password", "secret_key"])
+    .execute()?;
+
+// Exclude nested fields
+let results = users.query()
+    .exclude(&["address.street"])
+    .execute()?;
+```
+
+## Executing queries
+
+### `execute`
+
+Execute the query and return all matching documents.
+
+```rust
+pub fn execute(self) -> Result<Vec<Value>>
+```
+
+**Returns:** `Result<Vec<Value>>` - Vector of matching documents
+
+**Example:**
+```rust
+let results = users.query()
+    .filter("age >= 21")
+    .sort_by("name", SortOrder::Asc)
+    .limit(50)
+    .execute()?;
+
+for user in results {
+    println!("{}: {}", user["name"], user["age"]);
+}
+```
+
+---
+
+### `first`
+
+Execute the query and return only the first result.
+
+```rust
+pub fn first(self) -> Result<Option<Value>>
+```
+
+**Returns:** `Result<Option<Value>>` - The first matching document, or None
+
+**Example:**
+```rust
+if let Some(user) = users.query()
+    .filter("email is \"alice@example.com\"")
+    .first()? 
+{
+    println!("Found user: {}", user["name"]);
+}
+```
+
+---
+
+### `count`
+
+Count matching documents without fetching them.
+
+```rust
+pub fn count(self) -> Result<usize>
+```
+
+**Returns:** `Result<usize>` - Number of matching documents
+
+**Example:**
+```rust
+let total = users.query()
+    .filter("age >= 18")
+    .count()?;
+
+println!("Found {} adults", total);
+```
+
+## Complete examples
+
+### Pagination
+
+```rust
+use jasonisnthappy::SortOrder;
+
+let page_size = 20;
+let page_number = 2; // 0-indexed
+
+let results = users.query()
+    .filter("status is \"active\"")
+    .sort_by("created_at", SortOrder::Desc)
+    .skip(page_number * page_size)
+    .limit(page_size)
+    .execute()?;
+
+println!("Page {} has {} results", page_number + 1, results.len());
+```
+
+### Filtering and sorting
+
+```rust
+use jasonisnthappy::SortOrder;
+
+// Find active users in NYC, sorted by age (oldest first)
+let results = users.query()
+    .filter("city is \"NYC\" and status is \"active\"")
+    .sort_by("age", SortOrder::Desc)
+    .execute()?;
+```
+
+### Field projection
+
+```rust
+// Get only essential user info for a list view
+let users_list = users.query()
+    .filter("status is \"active\"")
+    .project(&["name", "email", "avatar_url"])
+    .sort_by("name", SortOrder::Asc)
+    .execute()?;
+
+// Or exclude sensitive fields
+let public_profiles = users.query()
+    .exclude(&["password", "api_key", "email"])
+    .execute()?;
+```
+
+### Complex query
+
+```rust
+use jasonisnthappy::SortOrder;
+
+// Get top 10 premium users in a specific city
+let results = users.query()
+    .filter("city is \"San Francisco\" and plan is \"premium\" and age >= 18")
+    .sort_by("signup_date", SortOrder::Asc)
+    .project(&["name", "email", "plan", "signup_date"])
+    .limit(10)
+    .execute()?;
+
+for (i, user) in results.iter().enumerate() {
+    println!("{}. {} ({})", i + 1, user["name"], user["email"]);
+}
+```
+
+### Nested field sorting and projection
+
+```rust
+use jasonisnthappy::SortOrder;
+
+// Sort by nested field
+let results = users.query()
+    .sort_by("address.city", SortOrder::Asc)
+    .sort_by("profile.score", SortOrder::Desc)
+    .execute()?;
+
+// Project nested fields
+let results = users.query()
+    .project(&["name", "address.city", "address.zip"])
+    .execute()?;
+```
+
+### Getting total count with pagination
+
+```rust
+use jasonisnthappy::SortOrder;
+
+let page_size = 20;
+let page = 0;
+
+// Get total count
+let total = users.query()
+    .filter("status is \"active\"")
+    .count()?;
+
+// Get page of results
+let results = users.query()
+    .filter("status is \"active\"")
+    .sort_by("name", SortOrder::Asc)
+    .skip(page * page_size)
+    .limit(page_size)
+    .execute()?;
+
+let total_pages = (total + page_size - 1) / page_size;
+println!("Page {}/{} ({} total results)", page + 1, total_pages, total);
+```

@@ -1,0 +1,359 @@
+---
+title: Python examples
+description: Practical examples for jasonisnthappy Python bindings
+---
+
+## Basic CRUD operations
+
+Complete example showing create, read, update, and delete operations.
+
+```python
+from jasonisnthappy import Database
+
+# Open database
+db = Database.open("./my_database.db")
+
+try:
+    # Begin transaction
+    tx = db.begin_transaction()
+
+    try:
+        # Insert document
+        doc_id = tx.insert("users", {
+            "name": "Alice",
+            "age": 30,
+            "email": "alice@example.com"
+        })
+        print(f"Inserted document with ID: {doc_id}")
+
+        # Find by ID
+        user = tx.find_by_id("users", doc_id)
+        print(f"Found: {user}")
+
+        # Update
+        tx.update_by_id("users", doc_id, {
+            "name": "Alice",
+            "age": 31,
+            "email": "alice@example.com"
+        })
+
+        # Find all
+        all_users = tx.find_all("users")
+        print(f"All users: {all_users}")
+
+        # Commit transaction
+        tx.commit()
+    except Exception as e:
+        # Rollback on error
+        tx.rollback()
+        raise
+finally:
+    db.close()
+```
+
+## Using context managers
+
+Simplified example using context managers for automatic resource cleanup.
+
+```python
+from jasonisnthappy import Database
+
+with Database.open("./my_database.db") as db:
+    with db.begin_transaction() as tx:
+        # Insert document
+        doc_id = tx.insert("users", {"name": "Alice", "age": 30})
+        
+        # Find document
+        user = tx.find_by_id("users", doc_id)
+        print(user)
+
+        # Transaction is automatically committed if no exception occurs
+        # or rolled back if an exception is raised
+```
+
+## Using collection API
+
+Example using non-transactional collection operations.
+
+```python
+from jasonisnthappy import Database
+
+with Database.open("./my_database.db") as db:
+    with db.get_collection("users") as coll:
+        # Insert a document
+        doc_id = coll.insert({"name": "Bob", "age": 25})
+        print(f"Inserted: {doc_id}")
+
+        # Query documents
+        results = coll.find("age > 20")
+        print(f"Found {len(results)} users over 20")
+
+        # Update with filter
+        count = coll.update("age > 20", {"verified": True})
+        print(f"Updated {count} documents")
+
+        # Delete with filter
+        count = coll.delete("age < 18")
+        print(f"Deleted {count} documents")
+```
+
+## Querying with options
+
+Example using advanced query options.
+
+```python
+from jasonisnthappy import Database
+
+with Database.open("./my_database.db") as db:
+    coll = db.get_collection("users")
+
+    # Query with sorting, pagination, and projection
+    results = coll.query_with_options(
+        filter_str="age > 25",
+        sort_field="age",
+        sort_asc=False,
+        limit=10,
+        skip=5,
+        project_fields=["name", "age", "email"]
+    )
+
+    for user in results:
+        print(f"{user['name']}: {user['age']}")
+
+    # Get first matching document
+    oldest = coll.query_first(
+        filter_str="verified == true",
+        sort_field="age",
+        sort_asc=False
+    )
+    if oldest:
+        print(f"Oldest verified user: {oldest}")
+
+    coll.close()
+```
+
+## Bulk operations
+
+Example inserting multiple documents efficiently.
+
+```python
+from jasonisnthappy import Database
+
+with Database.open("./my_database.db") as db:
+    coll = db.get_collection("users")
+
+    # Insert many documents at once
+    users = [
+        {"name": "Alice", "age": 30, "city": "NYC"},
+        {"name": "Bob", "age": 25, "city": "LA"},
+        {"name": "Charlie", "age": 35, "city": "SF"},
+        {"name": "Diana", "age": 28, "city": "NYC"}
+    ]
+    ids = coll.insert_many(users)
+    print(f"Inserted {len(ids)} documents")
+
+    # Bulk write with mixed operations
+    operations = [
+        {"op": "insert", "doc": {"name": "Eve", "age": 22}},
+        {"op": "update", "filter": "city == 'NYC'", "update": {"verified": True}},
+        {"op": "delete", "filter": "age < 18"}
+    ]
+    result = coll.bulk_write(operations, ordered=True)
+    print(f"Bulk write result: {result}")
+
+    coll.close()
+```
+
+## Watch for changes
+
+Example monitoring collection changes in real-time.
+
+```python
+import time
+from jasonisnthappy import Database
+
+def on_change(operation, doc_id, document):
+    print(f"[WATCH] {operation}: {doc_id}")
+    if document:
+        print(f"  Data: {document}")
+
+with Database.open("./my_database.db") as db:
+    coll = db.get_collection("events")
+
+    # Start watching
+    print("Starting watch...")
+    handle = coll.watch(on_change)
+
+    try:
+        # Insert a document
+        doc_id = coll.insert({
+            "_id": "event1",
+            "type": "login",
+            "user": "alice"
+        })
+        time.sleep(0.1)
+
+        # Update the document
+        coll.update_by_id("event1", {
+            "_id": "event1",
+            "type": "login",
+            "user": "alice_updated"
+        })
+        time.sleep(0.1)
+
+        # Delete the document
+        coll.delete_by_id("event1")
+        time.sleep(0.1)
+
+        print("Watch example completed!")
+    finally:
+        handle.stop()
+        coll.close()
+```
+
+## Indexing and schema validation
+
+Example creating indexes and setting up schema validation.
+
+```python
+from jasonisnthappy import Database
+
+with Database.open("./my_database.db") as db:
+    # Create a unique index on email
+    db.create_index("users", "email_idx", "email", unique=True)
+    print("Created unique index on email")
+
+    # Create a compound index
+    db.create_compound_index("users", "name_age_idx", ["name", "age"])
+    print("Created compound index on name and age")
+
+    # Create a text search index
+    db.create_text_index("articles", "content_text_idx", "content")
+    print("Created full-text search index")
+
+    # List all indexes
+    indexes = db.list_indexes("users")
+    for idx in indexes:
+        print(f"Index: {idx['name']}, Fields: {idx['fields']}, Unique: {idx['unique']}")
+
+    # Set JSON schema
+    schema = {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "age": {"type": "number"},
+            "email": {
+                "type": "string",
+                "format": "email"
+            }
+        },
+        "required": ["name", "email"]
+    }
+    db.set_schema("users", schema)
+    print("Set JSON schema for users collection")
+
+    # Get schema
+    current_schema = db.get_schema("users")
+    print(f"Current schema: {current_schema}")
+```
+
+## Aggregation pipeline
+
+Example using aggregation for complex queries.
+
+```python
+from jasonisnthappy import Database
+
+with Database.open("./my_database.db") as db:
+    coll = db.get_collection("sales")
+
+    # Aggregation pipeline
+    pipeline = [
+        # Match sales from 2024
+        {"$match": {"year": 2024}},
+        
+        # Group by product and sum quantities
+        {"$group": {
+            "_id": "$product",
+            "total_quantity": {"$sum": "$quantity"},
+            "total_revenue": {"$sum": "$revenue"}
+        }},
+        
+        # Sort by total revenue descending
+        {"$sort": {"total_revenue": -1}},
+        
+        # Limit to top 10
+        {"$limit": 10}
+    ]
+
+    results = coll.aggregate(pipeline)
+    
+    print("Top 10 products by revenue:")
+    for result in results:
+        print(f"  {result['_id']}: ${result['total_revenue']} ({result['total_quantity']} units)")
+
+    coll.close()
+```
+
+## Backup and maintenance
+
+Example performing database maintenance operations.
+
+```python
+from jasonisnthappy import Database
+
+with Database.open("./my_database.db") as db:
+    # Create backup
+    backup_path = "./backup.db"
+    db.backup(backup_path)
+    print(f"Created backup at {backup_path}")
+
+    # Verify backup
+    info = db.verify_backup(backup_path)
+    print(f"Backup info: {info}")
+
+    # Perform checkpoint
+    db.checkpoint()
+    print("Checkpoint completed")
+
+    # Get metrics
+    metrics = db.metrics()
+    print(f"Database metrics: {metrics}")
+
+    # Run garbage collection
+    stats = db.garbage_collect()
+    print(f"GC stats: {stats}")
+
+    # Get database info
+    db_info = db.database_info()
+    print(f"Database info: {db_info}")
+
+    # Get frame count
+    frames = db.frame_count()
+    print(f"WAL frames: {frames}")
+```
+
+## Web UI
+
+Example starting the web interface.
+
+```python
+import time
+from jasonisnthappy import Database
+
+with Database.open("./my_database.db") as db:
+    # Start web UI
+    server = db.start_web_ui("127.0.0.1:8080")
+    print("Web UI available at http://127.0.0.1:8080")
+
+    try:
+        # Keep the server running
+        print("Press Ctrl+C to stop...")
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\nStopping server...")
+    finally:
+        server.stop()
+        print("Server stopped")
+```

@@ -1,0 +1,278 @@
+---
+title: Web UI overview
+description: Built-in web dashboard for real-time database monitoring and management
+---
+
+The jasonisnthappy web UI provides a real-time dashboard for monitoring database metrics, managing collections, and viewing/editing documents through a browser interface.
+
+## Features
+
+The web UI includes:
+
+- **Real-time metrics dashboard** with auto-refresh every 5 seconds
+- **Collection browser** with full CRUD operations
+- **Document viewer** with inline editing
+- **Search and pagination** for large datasets
+- **REST API endpoints** for programmatic access
+- **Mobile-responsive design** with dark theme
+
+## Starting the web server
+
+Enable the `web-ui` feature in your `Cargo.toml`:
+
+```toml Cargo.toml
+[dependencies]
+jasonisnthappy = { version = "*", features = ["web-ui"] }
+```
+
+Start the web server using the `start_web_ui()` method:
+
+<CodeGroup>
+```rust Basic usage
+use jasonisnthappy::Database;
+use std::sync::Arc;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db = Database::open("mydb.db")?;
+    
+    // Start web UI on port 8080
+    let _server = db.start_web_ui("127.0.0.1:8080")?;
+    
+    println!("Web UI running at http://127.0.0.1:8080");
+    
+    // Keep server alive
+    std::thread::park();
+    
+    Ok(())
+}
+```
+
+```rust Custom port
+use jasonisnthappy::Database;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db = Database::open("mydb.db")?;
+    
+    // Start on custom port
+    let _server = db.start_web_ui("0.0.0.0:3000")?;
+    
+    println!("Web UI running at http://localhost:3000");
+    
+    std::thread::park();
+    Ok(())
+}
+```
+
+```rust With data operations
+use jasonisnthappy::Database;
+use serde_json::json;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db = Database::open("mydb.db")?;
+    
+    // Insert sample data
+    let mut tx = db.begin()?;
+    let mut users = tx.collection("users")?;
+    users.insert(json!({
+        "name": "Alice",
+        "email": "alice@example.com",
+        "role": "admin"
+    }))?;
+    tx.commit()?;
+    
+    // Start web UI
+    let _server = db.start_web_ui("127.0.0.1:8080")?;
+    println!("Dashboard: http://127.0.0.1:8080");
+    
+    std::thread::park();
+    Ok(())
+}
+```
+</CodeGroup>
+
+## Dashboard features
+
+### Metrics view
+
+The dashboard displays real-time metrics organized into four categories:
+
+**Transactions**
+- Active transactions count
+- Committed and aborted totals
+- Commit rate percentage
+- Transaction conflicts
+
+**Cache**
+- Cache hit rate
+- Cache hits and misses
+- Dirty pages count
+
+**Storage**
+- Pages allocated and freed
+- WAL writes and bytes written
+- Checkpoint count
+
+**Documents**
+- Documents inserted, updated, deleted
+- Documents read
+- Total operations
+
+<Info>
+Metrics automatically refresh every 5 seconds. The refresh indicator shows progress with a visual countdown.
+</Info>
+
+### Collection management
+
+The collections panel allows you to:
+
+- **View all collections** in alphabetical order
+- **Click a collection** to browse its documents
+- **Create new collections** with the "+ new collection" button
+- **Rename collections** using the rename button
+- **Delete collections** and all their documents
+
+### Document browser
+
+Click any collection to open the document browser:
+
+- **Search documents** - Type to filter by any field
+- **Paginate results** - Choose 10, 50, 100, 500, or 1000 docs per page
+- **View documents** - JSON formatted with syntax highlighting
+- **Edit documents** - Inline editor with validation
+- **Delete documents** - With confirmation prompt
+- **Create documents** - Add new documents with JSON editor
+
+<Note>
+Press `ESC` to close the document viewer and return to the dashboard.
+</Note>
+
+## Web server architecture
+
+The web server is implemented using the `tiny_http` library and runs in a separate thread:
+
+```rust src/core/web_server.rs
+pub struct WebServer {
+    handle: Option<JoinHandle<()>>,
+    shutdown: Arc<AtomicBool>,
+}
+
+impl WebServer {
+    pub fn start(db: Arc<Database>, addr: &str) -> Result<Self, Box<dyn std::error::Error>> {
+        let server = tiny_http::Server::http(addr)?;
+        let shutdown = Arc::new(AtomicBool::new(false));
+        
+        let handle = thread::spawn(move || {
+            for request in server.incoming_requests() {
+                // Route requests to handlers
+                let response = match (method, path) {
+                    ("GET", "/") => serve_dashboard(),
+                    ("GET", "/metrics") => serve_metrics(&db),
+                    ("GET", "/api/collections") => serve_collections_list(&db),
+                    // ... more routes
+                };
+                request.respond(response);
+            }
+        });
+        
+        Ok(WebServer { handle: Some(handle), shutdown })
+    }
+    
+    pub fn shutdown(mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
+        // Wait for thread to finish
+    }
+}
+```
+
+<Info>
+The web server automatically shuts down when the `WebServer` instance is dropped.
+</Info>
+
+## Example: Complete demo
+
+Here's a complete example that creates sample data and starts the web UI:
+
+```rust examples/web_ui_demo.rs
+use jasonisnthappy::Database;
+use serde_json::json;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db = Database::open("demo.db")?;
+    
+    // Create users collection with sample data
+    let mut tx = db.begin()?;
+    let mut users = tx.collection("users")?;
+    
+    for i in 1..=50 {
+        users.insert(json!({
+            "username": format!("user{}", i),
+            "email": format!("user{}@company.com", i),
+            "age": 20 + (i % 40),
+            "role": if i % 3 == 0 { "admin" } else { "user" },
+            "active": i % 4 != 0
+        }))?;
+    }
+    tx.commit()?;
+    
+    // Create products collection
+    let mut tx = db.begin()?;
+    let mut products = tx.collection("products")?;
+    
+    for i in 1..=40 {
+        products.insert(json!({
+            "name": format!("Product {}", i),
+            "sku": format!("SKU-{:05}", i * 100),
+            "price": (i as f64) * 12.99,
+            "in_stock": i % 3 != 0,
+            "category": if i % 2 == 0 { "electronics" } else { "accessories" }
+        }))?;
+    }
+    tx.commit()?;
+    
+    println!("Created sample data:");
+    println!("  - users: 50 documents");
+    println!("  - products: 40 documents");
+    
+    // Start web UI
+    let _server = db.start_web_ui("127.0.0.1:8080")?;
+    
+    println!("\n╔════════════════════════════════════════╗");
+    println!("║  Web UI: http://127.0.0.1:8080        ║");
+    println!("║  Press Ctrl+C to stop                 ║");
+    println!("╚════════════════════════════════════════╝\n");
+    
+    std::thread::park();
+    Ok(())
+}
+```
+
+## Security considerations
+
+<Note>
+The web UI is designed for local development and monitoring. Consider these security practices:
+
+- **Bind to localhost** (`127.0.0.1`) for local-only access
+- **Use a reverse proxy** (nginx, Caddy) with authentication for production
+- **Enable HTTPS** when exposing to networks
+- **Restrict network access** using firewall rules
+- **Monitor access logs** for suspicious activity
+</Note>
+
+## Browser compatibility
+
+The web UI works in all modern browsers:
+
+- Chrome/Edge 90+
+- Firefox 88+
+- Safari 14+
+- Mobile browsers (iOS Safari, Chrome Android)
+
+<Info>
+The UI is fully responsive and works on mobile devices with touch-optimized controls.
+</Info>
+
+## Next steps
+
+- [REST API reference](/web-ui/rest-api) - Detailed API endpoint documentation
+- [Metrics](/monitoring/metrics) - Understanding database metrics
+- [Observability](/monitoring/observability) - Advanced monitoring setup

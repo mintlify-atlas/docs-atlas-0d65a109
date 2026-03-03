@@ -1,0 +1,509 @@
+---
+title: Observability
+description: Advanced monitoring, backup, and operational best practices
+---
+
+This guide covers advanced observability patterns including real-time monitoring, backup strategies, and operational best practices for production deployments.
+
+## Real-time monitoring
+
+### Web UI dashboard
+
+The built-in web UI provides real-time metrics visualization:
+
+```rust
+use jasonisnthappy::Database;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db = Database::open("mydb.db")?;
+    
+    // Start web UI on port 8080
+    let _server = db.start_web_ui("127.0.0.1:8080")?;
+    
+    println!("Dashboard: http://127.0.0.1:8080");
+    println!("Metrics auto-refresh every 5 seconds");
+    
+    std::thread::park();
+    Ok(())
+}
+```
+
+The dashboard displays:
+
+- **Transaction metrics** - Active, committed, aborted, commit rate
+- **Cache performance** - Hit rate, hits, misses, dirty pages
+- **Storage stats** - Pages allocated/freed, WAL writes, checkpoints
+- **Document operations** - Inserts, updates, deletes, reads
+- **Collection browser** - View and manage collections and documents
+
+<Info>
+The web UI automatically pauses auto-refresh when viewing collections to avoid disrupting your workflow.
+</Info>
+
+### Programmatic monitoring
+
+Access metrics via the REST API:
+
+```bash
+# Get current metrics
+curl http://127.0.0.1:8080/metrics | jq '.'
+
+# Monitor cache hit rate
+watch -n 5 'curl -s http://127.0.0.1:8080/metrics | jq "{cache_hit_rate, active_transactions}"'
+```
+
+**Response**
+
+```json
+{
+  "cache_hit_rate": 0.87,
+  "active_transactions": 2
+}
+```
+
+## Backup and restore
+
+### Creating backups
+
+Create point-in-time backups using the `backup()` method:
+
+```rust
+use jasonisnthappy::Database;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db = Database::open("mydb.db")?;
+    
+    // Perform operations...
+    
+    // Create backup
+    let backup_path = format!(
+        "backups/mydb-{}.db",
+        chrono::Local::now().format("%Y%m%d-%H%M%S")
+    );
+    
+    db.backup(&backup_path)?;
+    println!("Backup created: {}", backup_path);
+    
+    Ok(())
+}
+```
+
+<Note>
+Backups are atomic - the database is checkpointed (WAL is flushed) before copying, ensuring consistency.
+</Note>
+
+### Verifying backups
+
+Verify backup integrity using `verify_backup()`:
+
+```rust
+use jasonisnthappy::{Database, BackupInfo};
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let backup_path = "backups/mydb-20240315-120000.db";
+    
+    // Verify backup
+    let info: BackupInfo = Database::verify_backup(backup_path)?;
+    
+    println!("Backup verification:");
+    println!("  Version:     {}", info.version);
+    println!("  Collections: {}", info.num_collections);
+    println!("  Pages:       {}", info.num_pages);
+    println!("  File size:   {} MB", info.file_size / 1_048_576);
+    
+    Ok(())
+}
+```
+
+**BackupInfo structure**
+
+<ParamField path="version" type="u32">
+  Database format version number
+</ParamField>
+
+<ParamField path="num_pages" type="u32">
+  Total number of pages in the backup
+</ParamField>
+
+<ParamField path="num_collections" type="usize">
+  Number of collections in the backup
+</ParamField>
+
+<ParamField path="file_size" type="u64">
+  Backup file size in bytes
+</ParamField>
+
+### Restoring from backup
+
+To restore, simply open the backup file:
+
+```rust
+use jasonisnthappy::Database;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Open the backup file
+    let restored_db = Database::open("backups/mydb-20240315-120000.db")?;
+    
+    // Verify data
+    let mut tx = restored_db.begin()?;
+    let users = tx.collection("users")?;
+    let docs = users.find_all()?;
+    
+    println!("Restored {} documents", docs.len());
+    
+    Ok(())
+}
+```
+
+<Info>
+Backup files are fully functional databases - you can query them directly without restoration.
+</Info>
+
+### Automated backup schedule
+
+```rust
+use jasonisnthappy::Database;
+use std::thread;
+use std::time::Duration;
+
+fn start_backup_schedule(db: Database, interval_secs: u64) {
+    thread::spawn(move || {
+        loop {
+            thread::sleep(Duration::from_secs(interval_secs));
+            
+            let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+            let backup_path = format!("backups/auto-{}.db", timestamp);
+            
+            match db.backup(&backup_path) {
+                Ok(_) => println!("[BACKUP] Created: {}", backup_path),
+                Err(e) => eprintln!("[BACKUP] Failed: {}", e),
+            }
+        }
+    });
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db = Database::open("mydb.db")?;
+    
+    // Create backup every hour
+    start_backup_schedule(db.clone(), 3600);
+    
+    // Your application logic...
+    
+    Ok(())
+}
+```
+
+### Backup rotation
+
+Implement backup retention policies:
+
+```rust
+use std::fs;
+use std::path::Path;
+use chrono::{DateTime, Local, Duration};
+
+fn rotate_backups(backup_dir: &str, keep_days: i64) -> std::io::Result<()> {
+    let cutoff = Local::now() - Duration::days(keep_days);
+    
+    for entry in fs::read_dir(backup_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        
+        if path.extension().and_then(|s| s.to_str()) != Some("db") {
+            continue;
+        }
+        
+        let metadata = fs::metadata(&path)?;
+        let modified: DateTime<Local> = metadata.modified()?.into();
+        
+        if modified < cutoff {
+            println!("Removing old backup: {:?}", path);
+            fs::remove_file(&path)?;
+            
+            // Also remove WAL and lock files
+            let _ = fs::remove_file(format!("{}-wal", path.display()));
+            let _ = fs::remove_file(format!("{}.lock", path.display()));
+        }
+    }
+    
+    Ok(())
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Keep backups for 7 days
+    rotate_backups("backups", 7)?;
+    
+    Ok(())
+}
+```
+
+## Complete observability example
+
+Here's a comprehensive example combining metrics, backups, and monitoring:
+
+```rust examples/metrics_demo.rs
+use jasonisnthappy::{Database, BackupInfo};
+use serde_json::json;
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let db = Database::open("metrics_demo.db")?;
+    
+    // 1. Insert data
+    println!("Inserting 50 documents...");
+    for batch in 0..5 {
+        let mut tx = db.begin()?;
+        let mut users = tx.collection("users")?;
+        
+        for i in 1..=10 {
+            users.insert(json!({
+                "name": format!("User {}", batch * 10 + i),
+                "age": 20 + i,
+                "active": true
+            }))?;
+        }
+        tx.commit()?;
+    }
+    println!("✓ Inserted 50 documents in 5 transactions\n");
+    
+    // 2. Read and update data
+    let mut tx = db.begin()?;
+    let mut users = tx.collection("users")?;
+    let all_docs = users.find_all()?;
+    println!("✓ Read {} documents", all_docs.len());
+    
+    // Update first 5 documents
+    for doc in all_docs.iter().take(5) {
+        let id = doc["_id"].as_str().unwrap();
+        users.update_by_id(id, json!({"active": false}))?;
+    }
+    tx.commit()?;
+    println!("✓ Updated 5 documents\n");
+    
+    // 3. Display comprehensive metrics
+    println!("=== Metrics Snapshot ===");
+    let metrics = db.metrics();
+    
+    println!("\n📊 TRANSACTIONS:");
+    println!("   Active:          {}", metrics.active_transactions);
+    println!("   Begun:           {}", metrics.transactions_begun);
+    println!("   Committed:       {}", metrics.transactions_committed);
+    println!("   Aborted:         {}", metrics.transactions_aborted);
+    println!("   Commit Rate:     {:.1}%", metrics.commit_rate * 100.0);
+    println!("   Conflicts:       {}", metrics.transaction_conflicts);
+    
+    println!("\n💾 CACHE:");
+    println!("   Hit Rate:        {:.2}%", metrics.cache_hit_rate * 100.0);
+    println!("   Hits:            {}", metrics.cache_hits);
+    println!("   Misses:          {}", metrics.cache_misses);
+    println!("   Total Requests:  {}", metrics.cache_total_requests);
+    println!("   Dirty Pages:     {}", metrics.dirty_pages);
+    
+    println!("\n📦 STORAGE:");
+    println!("   Pages Allocated: {}", metrics.pages_allocated);
+    println!("   Pages Freed:     {}", metrics.pages_freed);
+    println!("   WAL Writes:      {}", metrics.wal_writes);
+    println!("   WAL Bytes:       {} bytes", metrics.wal_bytes_written);
+    println!("   Checkpoints:     {}", metrics.checkpoints);
+    
+    println!("\n📄 DOCUMENTS:");
+    println!("   Inserted:        {}", metrics.documents_inserted);
+    println!("   Updated:         {}", metrics.documents_updated);
+    println!("   Deleted:         {}", metrics.documents_deleted);
+    println!("   Read:            {}", metrics.documents_read);
+    println!("   Total Ops:       {}", metrics.total_document_operations);
+    
+    println!("\n⚠️  ERRORS:");
+    println!("   I/O Errors:      {}", metrics.io_errors);
+    println!("   Conflicts:       {}", metrics.transaction_conflicts);
+    
+    // 4. Create backup
+    println!("\n=== Creating Backup ===");
+    db.backup("metrics_demo_backup.db")?;
+    println!("✓ Backup created");
+    
+    // 5. Verify backup
+    let info: BackupInfo = Database::verify_backup("metrics_demo_backup.db")?;
+    println!("✓ Backup verified:");
+    println!("   Version:         {}", info.version);
+    println!("   Collections:     {}", info.num_collections);
+    println!("   Pages:           {}", info.num_pages);
+    println!("   File Size:       {} KB", info.file_size / 1024);
+    
+    // 6. Verify backup by opening it
+    println!("\n=== Verifying Backup Data ===");
+    let backup_db = Database::open("metrics_demo_backup.db")?;
+    let mut backup_tx = backup_db.begin()?;
+    let backup_users = backup_tx.collection("users")?;
+    let backup_docs = backup_users.find_all()?;
+    println!("✓ Backup contains {} documents", backup_docs.len());
+    println!("✓ Backup is fully functional!\n");
+    
+    println!("=== Demo Complete! ===");
+    println!("\nTo view metrics in your browser:");
+    println!("  cargo run --example web_ui_demo --features web-ui");
+    println!("  Then visit: http://127.0.0.1:8080\n");
+    
+    db.close()?;
+    backup_db.close()?;
+    
+    Ok(())
+}
+```
+
+## Monitoring best practices
+
+### 1. Track key metrics
+
+Focus on these critical metrics:
+
+- **Cache hit rate** - Should be > 70%, ideally > 90%
+- **Active transactions** - High counts may indicate contention
+- **Commit rate** - Should be close to 100%
+- **I/O errors** - Should always be 0
+
+### 2. Set up alerts
+
+```rust
+fn check_health(db: &Database) -> Vec<String> {
+    let metrics = db.metrics();
+    let mut warnings = Vec::new();
+    
+    if metrics.cache_hit_rate < 0.7 {
+        warnings.push(format!(
+            "Low cache hit rate: {:.1}%",
+            metrics.cache_hit_rate * 100.0
+        ));
+    }
+    
+    if metrics.io_errors > 0 {
+        warnings.push(format!(
+            "I/O errors detected: {}",
+            metrics.io_errors
+        ));
+    }
+    
+    if metrics.active_transactions > 100 {
+        warnings.push(format!(
+            "High transaction count: {}",
+            metrics.active_transactions
+        ));
+    }
+    
+    if metrics.commit_rate < 0.95 {
+        warnings.push(format!(
+            "Low commit rate: {:.1}%",
+            metrics.commit_rate * 100.0
+        ));
+    }
+    
+    warnings
+}
+```
+
+### 3. Regular backups
+
+- **Frequency** - Hourly for critical data, daily for less critical
+- **Verification** - Always verify backups after creation
+- **Retention** - Keep 7-30 days depending on requirements
+- **Off-site** - Store backups in separate location/cloud
+
+### 4. Log rotation
+
+Rotate WAL and database files periodically:
+
+```rust
+// Checkpoint to flush WAL
+db.checkpoint()?;
+
+// Then backup
+db.backup("backup.db")?;
+```
+
+### 5. Performance tuning
+
+Adjust cache size based on metrics:
+
+```rust
+use jasonisnthappy::DatabaseOptions;
+
+// Increase cache if hit rate is low
+let db = DatabaseOptions::new()
+    .cache_size(10000)  // 10K pages = ~40MB
+    .open("mydb.db")?;
+```
+
+## Production deployment checklist
+
+<Note>
+Before deploying to production:
+
+1. **Enable web UI** with authentication (reverse proxy)
+2. **Set up automated backups** with verification
+3. **Configure backup retention** policy
+4. **Monitor cache hit rate** and adjust cache size
+5. **Set up alerting** for critical metrics
+6. **Test restore procedures** regularly
+7. **Document recovery process** for your team
+8. **Monitor disk space** for database and backups
+9. **Review metrics** weekly for trends
+10. **Plan for growth** - monitor page allocation rate
+</Note>
+
+## Integration with monitoring systems
+
+### Prometheus
+
+```rust
+use prometheus::{IntGauge, Encoder, TextEncoder};
+
+fn export_prometheus_metrics(db: &Database) -> String {
+    let metrics = db.metrics();
+    
+    let registry = prometheus::Registry::new();
+    
+    let cache_hit_rate = IntGauge::new(
+        "db_cache_hit_rate",
+        "Cache hit rate percentage"
+    ).unwrap();
+    cache_hit_rate.set((metrics.cache_hit_rate * 100.0) as i64);
+    registry.register(Box::new(cache_hit_rate)).unwrap();
+    
+    // Add more metrics...
+    
+    let mut buffer = Vec::new();
+    let encoder = TextEncoder::new();
+    encoder.encode(&registry.gather(), &mut buffer).unwrap();
+    
+    String::from_utf8(buffer).unwrap()
+}
+```
+
+### Structured logging
+
+```rust
+use serde_json::json;
+
+fn log_metrics(db: &Database) {
+    let metrics = db.metrics();
+    
+    let log = json!({
+        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "service": "database",
+        "metrics": {
+            "cache_hit_rate": metrics.cache_hit_rate,
+            "active_transactions": metrics.active_transactions,
+            "documents_inserted": metrics.documents_inserted,
+            "io_errors": metrics.io_errors
+        }
+    });
+    
+    println!("{}", serde_json::to_string(&log).unwrap());
+}
+```
+
+## Next steps
+
+- [Metrics reference](/monitoring/metrics) - Complete metrics documentation
+- [Web UI overview](/web-ui/overview) - Real-time dashboard
+- [REST API](/web-ui/rest-api) - Programmatic access to metrics

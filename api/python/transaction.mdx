@@ -1,0 +1,301 @@
+---
+title: Transaction
+description: Transactional operations for jasonisnthappy Python bindings
+---
+
+The `Transaction` class represents a database transaction.
+
+## Transaction lifecycle
+
+### commit
+
+Commits the transaction.
+
+```python
+def commit() -> None
+```
+
+**Example:**
+
+```python
+tx = db.begin_transaction()
+try:
+    # Perform operations
+    tx.commit()
+except Exception:
+    tx.rollback()
+    raise
+```
+
+### rollback
+
+Rolls back the transaction.
+
+```python
+def rollback() -> None
+```
+
+**Example:**
+
+```python
+tx = db.begin_transaction()
+try:
+    # Perform operations
+    tx.commit()
+except Exception:
+    tx.rollback()
+    raise
+```
+
+### Context manager support
+
+Transactions automatically commit on success and rollback on exception.
+
+**Example:**
+
+```python
+with db.begin_transaction() as tx:
+    doc_id = tx.insert("users", {"name": "Alice", "age": 30})
+    # Transaction is automatically committed if no exception occurs
+    # or rolled back if an exception is raised
+```
+
+### is_active
+
+Checks if the transaction is still active.
+
+```python
+def is_active() -> bool
+```
+
+<ResponseField name="bool" type="bool">
+  True if the transaction is active
+</ResponseField>
+
+## Document operations
+
+### insert
+
+Inserts a document into a collection.
+
+```python
+def insert(collection_name: str, doc: Dict[str, Any]) -> str
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="doc" type="Dict[str, Any]" required>
+  Document to insert
+</ParamField>
+
+<ResponseField name="str" type="str">
+  ID of the inserted document
+</ResponseField>
+
+**Example:**
+
+```python
+tx = db.begin_transaction()
+try:
+    doc_id = tx.insert("users", {
+        "name": "Alice",
+        "age": 30,
+        "email": "alice@example.com"
+    })
+    print(f"Inserted document with ID: {doc_id}")
+    tx.commit()
+except Exception:
+    tx.rollback()
+    raise
+```
+
+### find_by_id
+
+Finds a document by its ID.
+
+```python
+def find_by_id(collection_name: str, doc_id: str) -> Optional[Dict[str, Any]]
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="doc_id" type="str" required>
+  Document ID to find
+</ParamField>
+
+<ResponseField name="Optional[Dict[str, Any]]" type="Optional[Dict[str, Any]]">
+  Document if found, None otherwise
+</ResponseField>
+
+**Example:**
+
+```python
+doc = tx.find_by_id("users", "user123")
+if doc:
+    print(f"Found: {doc}")
+else:
+    print("Document not found")
+```
+
+### update_by_id
+
+Updates a document by its ID.
+
+```python
+def update_by_id(collection_name: str, doc_id: str, doc: Dict[str, Any]) -> None
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="doc_id" type="str" required>
+  Document ID to update
+</ParamField>
+
+<ParamField path="doc" type="Dict[str, Any]" required>
+  Updated document data
+</ParamField>
+
+**Example:**
+
+```python
+tx.update_by_id("users", "user123", {
+    "name": "Alice Smith",
+    "age": 31,
+    "email": "alice@example.com"
+})
+```
+
+### delete_by_id
+
+Deletes a document by its ID.
+
+```python
+def delete_by_id(collection_name: str, doc_id: str) -> None
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="doc_id" type="str" required>
+  Document ID to delete
+</ParamField>
+
+**Example:**
+
+```python
+tx.delete_by_id("users", "user123")
+```
+
+### find_all
+
+Finds all documents in a collection.
+
+```python
+def find_all(collection_name: str) -> List[Dict[str, Any]]
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="List[Dict[str, Any]]" type="List[Dict[str, Any]]">
+  List of all documents
+</ResponseField>
+
+**Example:**
+
+```python
+all_users = tx.find_all("users")
+for user in all_users:
+    print(f"User: {user}")
+```
+
+### count
+
+Counts documents in a collection.
+
+```python
+def count(collection_name: str) -> int
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="int" type="int">
+  Number of documents
+</ResponseField>
+
+**Example:**
+
+```python
+count = tx.count("users")
+print(f"Total users: {count}")
+```
+
+## Collection management
+
+### create_collection
+
+Creates a new collection.
+
+```python
+def create_collection(collection_name: str) -> None
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection to create
+</ParamField>
+
+**Example:**
+
+```python
+tx.create_collection("products")
+```
+
+### drop_collection
+
+Drops a collection.
+
+```python
+def drop_collection(collection_name: str) -> None
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection to drop
+</ParamField>
+
+**Example:**
+
+```python
+tx.drop_collection("old_data")
+```
+
+### rename_collection
+
+Renames a collection.
+
+```python
+def rename_collection(old_name: str, new_name: str) -> None
+```
+
+<ParamField path="old_name" type="str" required>
+  Current name of the collection
+</ParamField>
+
+<ParamField path="new_name" type="str" required>
+  New name for the collection
+</ParamField>
+
+**Example:**
+
+```python
+tx.rename_collection("users", "customers")
+```

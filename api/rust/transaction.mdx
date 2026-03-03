@@ -1,0 +1,322 @@
+---
+title: Transaction
+description: ACID transaction API for jasonisnthappy
+---
+
+The `Transaction` struct provides ACID transaction support with snapshot isolation and optimistic concurrency control.
+
+## Creating transactions
+
+Transactions are created using `Database::begin()` or `Database::run_transaction()`.
+
+```rust
+let mut tx = db.begin()?;
+// Perform operations...
+tx.commit()?;
+```
+
+For automatic retry on conflicts:
+
+```rust
+db.run_transaction(|tx| {
+    // Perform operations...
+    Ok(())
+})?;
+```
+
+## Collection operations
+
+### `collection`
+
+Get a collection handle within the transaction.
+
+```rust
+pub fn collection(&mut self, name: &str) -> Result<TxCollection<'_>>
+```
+
+<ParamField path="name" type="&str" required>
+  Name of the collection
+</ParamField>
+
+**Returns:** `Result<TxCollection>` - A transactional collection handle
+
+**Example:**
+```rust
+let mut tx = db.begin()?;
+let mut users = tx.collection("users")?;
+users.insert(json!({"name": "Alice"}))?;
+tx.commit()?;
+```
+
+---
+
+### `create_collection`
+
+Create a new collection within the transaction.
+
+```rust
+pub fn create_collection(&mut self, name: &str) -> Result<()>
+```
+
+<ParamField path="name" type="&str" required>
+  Name of the collection to create
+</ParamField>
+
+**Example:**
+```rust
+let mut tx = db.begin()?;
+tx.create_collection("orders")?;
+tx.commit()?;
+```
+
+---
+
+### `drop_collection`
+
+Drop (delete) a collection and all its documents.
+
+```rust
+pub fn drop_collection(&mut self, name: &str) -> Result<()>
+```
+
+<ParamField path="name" type="&str" required>
+  Name of the collection to drop
+</ParamField>
+
+**Example:**
+```rust
+let mut tx = db.begin()?;
+tx.drop_collection("temp_data")?;
+tx.commit()?;
+```
+
+---
+
+### `rename_collection`
+
+Rename a collection.
+
+```rust
+pub fn rename_collection(&mut self, old_name: &str, new_name: &str) -> Result<()>
+```
+
+<ParamField path="old_name" type="&str" required>
+  Current name of the collection
+</ParamField>
+
+<ParamField path="new_name" type="&str" required>
+  New name for the collection
+</ParamField>
+
+**Example:**
+```rust
+let mut tx = db.begin()?;
+tx.rename_collection("users", "customers")?;
+tx.commit()?;
+```
+
+## Transaction control
+
+### `commit`
+
+Commit the transaction, making all changes permanent.
+
+```rust
+pub fn commit(&mut self) -> Result<()>
+```
+
+**Returns:** `Result<()>` - Ok if committed successfully, or Error::TxConflict if there was a write conflict
+
+**Example:**
+```rust
+let mut tx = db.begin()?;
+// Perform operations...
+match tx.commit() {
+    Ok(_) => println!("Transaction committed"),
+    Err(Error::TxConflict) => println!("Conflict detected, retry"),
+    Err(e) => println!("Error: {}", e),
+}
+```
+
+---
+
+### `rollback`
+
+Rollback the transaction, discarding all changes.
+
+```rust
+pub fn rollback(&mut self) -> Result<()>
+```
+
+**Example:**
+```rust
+let mut tx = db.begin()?;
+// Perform operations...
+if should_cancel {
+    tx.rollback()?;
+} else {
+    tx.commit()?;
+}
+```
+
+---
+
+### `is_active`
+
+Check if the transaction is still active.
+
+```rust
+pub fn is_active(&self) -> bool
+```
+
+**Returns:** `bool` - true if active, false if committed or rolled back
+
+## Transaction properties
+
+Each transaction has the following properties:
+
+<ResponseField name="tx_id" type="u64">
+  Unique transaction ID
+</ResponseField>
+
+<ResponseField name="mvcc_tx_id" type="TransactionID">
+  MVCC transaction ID for versioning
+</ResponseField>
+
+<ResponseField name="snapshot_id" type="TransactionID">
+  Snapshot ID representing the transaction's view of the database
+</ResponseField>
+
+<ResponseField name="state" type="TxState">
+  Current transaction state (Active, Committed, or RolledBack)
+</ResponseField>
+
+## Error handling
+
+Transactions can fail for several reasons:
+
+### Write conflicts
+
+Occur when two transactions try to modify the same document:
+
+```rust
+let result = tx.commit();
+match result {
+    Err(Error::TxConflict) => {
+        // Another transaction modified the same data
+        // Retry the transaction
+    }
+    Ok(_) => println!("Success"),
+    Err(e) => println!("Other error: {}", e),
+}
+```
+
+### Automatic retry
+
+Use `run_transaction` for automatic retry with exponential backoff:
+
+```rust
+let result = db.run_transaction(|tx| {
+    let mut users = tx.collection("users")?;
+    users.insert(json!({"name": "Bob"}))?;
+    Ok(())
+});
+
+// Automatically retries up to max_retries times on conflicts
+```
+
+## Best practices
+
+### Keep transactions short
+
+Transactions hold locks and resources. Complete them quickly:
+
+```rust
+// Good: short transaction
+db.run_transaction(|tx| {
+    let mut users = tx.collection("users")?;
+    users.update_by_id("user_123", json!({"status": "active"}))?;
+    Ok(())
+})?;
+
+// Avoid: long-running transaction
+db.run_transaction(|tx| {
+    // Don't do expensive I/O or computation here
+    let data = fetch_from_external_api()?; // BAD
+    thread::sleep(Duration::from_secs(10)); // BAD
+    Ok(())
+})?;
+```
+
+### Handle conflicts gracefully
+
+Use `run_transaction` for automatic retry, or implement custom retry logic:
+
+```rust
+let mut attempts = 0;
+let max_attempts = 5;
+
+loop {
+    let mut tx = db.begin()?;
+    
+    match perform_update(&mut tx) {
+        Ok(_) => match tx.commit() {
+            Ok(_) => break,
+            Err(Error::TxConflict) if attempts < max_attempts => {
+                attempts += 1;
+                thread::sleep(Duration::from_millis(10 * attempts));
+                continue;
+            }
+            Err(e) => return Err(e),
+        },
+        Err(e) => {
+            tx.rollback()?;
+            return Err(e);
+        }
+    }
+}
+```
+
+### Always commit or rollback
+
+Transactions that are neither committed nor rolled back will be automatically rolled back when dropped:
+
+```rust
+{
+    let mut tx = db.begin()?;
+    let mut users = tx.collection("users")?;
+    users.insert(json!({"name": "Alice"}))?;
+    // Transaction is rolled back here when `tx` goes out of scope
+}
+
+// Explicitly commit:
+{
+    let mut tx = db.begin()?;
+    let mut users = tx.collection("users")?;
+    users.insert(json!({"name": "Alice"}))?;
+    tx.commit()?; // Changes are persisted
+}
+```
+
+## Snapshot isolation
+
+jasonisnthappy provides snapshot isolation:
+
+- Each transaction sees a consistent snapshot of the database
+- Changes made by other transactions are not visible
+- Write conflicts are detected at commit time
+
+```rust
+// Transaction 1
+let mut tx1 = db.begin()?;
+let users1 = db.collection("users");
+let count1 = users1.count()?; // Sees snapshot at tx1 start time
+
+// Transaction 2 inserts a document
+let users2 = db.collection("users");
+users2.insert(json!({"name": "New User"}))?;
+
+// Transaction 1 still sees the old count
+let count_still = users1.count()?; // Same as count1
+tx1.commit()?;
+```

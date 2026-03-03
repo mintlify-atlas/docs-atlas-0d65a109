@@ -1,0 +1,267 @@
+---
+title: Architecture
+description: Understanding jasonisnthappy's embedded database design
+---
+
+jasonisnthappy is a pure Rust embedded document database designed for applications that need ACID guarantees without running a separate database server. This page explains the core architectural components and how they work together.
+
+## Overview
+
+The database uses a **layered architecture** where each component has a specific responsibility:
+
+```
+┌─────────────────────────────────────┐
+│     Database / Transaction API      │  ← User-facing interface
+├─────────────────────────────────────┤
+│    MVCC Transaction Manager         │  ← Snapshot isolation
+├─────────────────────────────────────┤
+│   B-tree Storage Engine (CoW)       │  ← Document indexing
+├─────────────────────────────────────┤
+│  Pager (LRU Cache + Page Alloc)    │  ← Page management
+├─────────────────────────────────────┤
+│   Write-Ahead Log (WAL)             │  ← Durability & recovery
+├─────────────────────────────────────┤
+│        File System                  │  ← Physical storage
+└─────────────────────────────────────┘
+```
+
+## Core components
+
+### Database
+
+The `Database` struct (src/core/database.rs:154) is the top-level coordinator that manages all subsystems:
+
+```rust
+pub struct Database {
+    pager: Arc<Pager>,
+    wal: Arc<WAL>,
+    metadata: Arc<RwLock<Metadata>>,
+    tx_manager: Arc<TransactionManager>,
+    version_chains: Arc<RwLock<HashMap<...>>>,
+    // ... configuration and metrics
+}
+```
+
+**Responsibilities:**
+- Initialize and coordinate all subsystems
+- Manage collection metadata (schemas, indexes, roots)
+- Provide transaction lifecycle management
+- Execute automatic checkpointing
+- Track database-wide metrics
+
+<Info>
+The database uses **Arc** (atomic reference counting) to share components safely across threads, enabling concurrent read transactions.
+</Info>
+
+### Pager
+
+The pager (src/core/pager.rs:145) manages page-level storage with an LRU cache:
+
+```rust
+pub struct Pager {
+    file: Arc<Mutex<File>>,
+    cache: LRUCache,              // ~100MB default
+    num_pages: Arc<RwLock<u64>>,
+    metadata_page: Arc<RwLock<u64>>,
+    free_list: Arc<RwLock<Vec<PageNum>>>,
+    // ...
+}
+```
+
+**Key features:**
+- **4KB pages** - Standard page size for efficient I/O
+- **LRU caching** - 25,000 page default (~100MB)
+- **Free list management** - Reuses deleted pages
+- **Corruption detection** - Validates header on open (src/core/pager.rs:222)
+
+<Tip>
+The pager's `write_pages_direct()` method batches consecutive pages into single syscalls during checkpoints, reducing I/O overhead by 10-20x for large transactions.
+</Tip>
+
+### Write-Ahead Log (WAL)
+
+The WAL (src/core/wal.rs:52) ensures durability through append-only logging:
+
+```rust
+pub struct WALFrame {
+    pub tx_id: u64,
+    pub page_num: u64,
+    pub page_data: Vec<u8>,    // 4KB
+    pub checksum: u32,         // CRC32 integrity check
+    pub salt1: u32,            // Replay protection
+    pub salt2: u32,
+}
+```
+
+**How it works:**
+1. **Before commit**: Write modified pages to WAL with checksums
+2. **fsync WAL**: Guarantee durability to disk
+3. **Update database**: Write pages to main file
+4. **Checkpoint**: Merge WAL into main file, truncate WAL
+
+The WAL protects against:
+- Crashes during commit (replay from WAL on recovery)
+- Torn writes (checksums detect corruption)
+- Incomplete transactions (salt values prevent stale frame replay)
+
+<Warning>
+The WAL must be synced before a transaction commits. If the process crashes before `fsync()`, the transaction is lost. This is by design for ACID compliance.
+</Warning>
+
+### B-tree Storage Engine
+
+Documents are stored in copy-on-write B-trees (src/core/btree.rs:84):
+
+```rust
+pub struct BTree {
+    pager: Arc<Pager>,
+    inner: Arc<RwLock<BTreeInner>>,  // CoW state tracking
+}
+
+struct BTreeInner {
+    root_page: u64,
+    cow_pages: HashMap<u64, u64>,    // old → new page mapping
+    new_pages: HashMap<u64, bool>,   // track allocated pages
+}
+```
+
+**Copy-on-Write (CoW):**
+- When a transaction modifies a page, it allocates a **new page** instead of overwriting
+- Old pages remain untouched for concurrent readers
+- On commit, the new root is atomically swapped
+- Supports **O(log n)** document lookup, insert, and deletion
+
+<Accordion title="Why copy-on-write?">
+CoW enables snapshot isolation without locks:
+
+- **Readers** use the old root pointer → never blocked by writers
+- **Writers** build new tree versions → never blocked by readers
+- **Atomic commits** → just swap root pointer
+
+The tradeoff is space: each transaction creates new pages. Garbage collection reclaims old versions when no transaction needs them.
+</Accordion>
+
+## Data flow: Insert operation
+
+Here's how a document insert flows through the system:
+
+```rust
+let mut tx = db.begin()?;
+let mut users = tx.collection("users");
+users.insert(json!({"name": "Alice"}))?;
+tx.commit()?;
+```
+
+**Step-by-step execution:**
+
+1. **Begin transaction** (src/core/transaction.rs:56)
+   - Allocate MVCC transaction ID (xmin)
+   - Capture snapshot ID (latest committed tx)
+   - Take snapshot of all collection B-tree roots
+
+2. **Insert document** (src/core/tx_collection.rs)
+   - Allocate new page for document
+   - Write versioned document with xmin = current tx
+   - Insert into CoW B-tree (may trigger splits)
+   - Track document write in transaction
+
+3. **Commit transaction** (src/core/transaction.rs:445)
+   - **Conflict detection**: Check if other transactions modified same documents
+   - **Acquire commit lock**: Serialize commits
+   - **Write to WAL**: Log all page changes with checksums
+   - **Write to pager**: Update pages in cache
+   - **Sync WAL**: fsync() for durability
+   - **Update metadata**: New B-tree roots
+   - **Mark committed**: Update MVCC manager
+
+<Info>
+The entire commit executes in **~8ms** with fsync enabled (see README.md:64). The WAL and batch commit optimizations are critical for this performance.
+</Info>
+
+## Concurrency model
+
+jasonisnthappy uses **optimistic concurrency control**:
+
+- **Multiple readers**: Share the same snapshot, never block each other
+- **Multiple writers**: Build independent tree versions, serialize at commit
+- **Read + Write**: Readers use old snapshot, writers create new version
+
+**Conflict detection happens at commit time:**
+- Check if documents modified by this transaction were also changed by a committed transaction
+- If conflict detected → rollback and retry (automatic with `run_transaction()`)
+- If no conflict → commit succeeds
+
+See [Transactions](/concepts/transactions) for details on conflict detection.
+
+## File layout
+
+A jasonisnthappy database consists of two files:
+
+```
+mydb.db          # Main database file
+mydb.db-wal      # Write-ahead log
+mydb.db.lock     # Lock file (exclusive write mode)
+```
+
+**Database file structure:**
+
+```
+┌──────────────────────┐
+│  Page 0: Header      │  ← Magic, version, num_pages, metadata_page
+├──────────────────────┤
+│  Page 1...N: Data    │  ← B-tree nodes, documents, indexes
+├──────────────────────┤
+│  Page M: Metadata    │  ← Collections, schemas, index definitions
+└──────────────────────┘
+```
+
+The header (src/core/pager.rs:15) contains:
+- Magic number validation (`JSIN`)
+- Version and page size
+- Total page count
+- Metadata page pointer
+- Free page list
+- Next transaction ID
+
+## Performance characteristics
+
+From the README benchmarks:
+
+- **Write throughput**: ~19,150 docs/sec (1000 docs per transaction)
+- **Read latency**: 0.009ms @ 16 threads (MVCC snapshot isolation)
+- **Query speed**: Sub-millisecond even on 2500+ documents
+- **Concurrent writes**: Linear scaling up to core count
+
+**Key design decisions for performance:**
+
+1. **LRU page cache** - 100MB default reduces disk I/O
+2. **Batch commits** - Groups up to 32 transactions into single fsync
+3. **Sequential WAL writes** - Append-only for minimal seek overhead
+4. **Batched checkpoints** - Writes consecutive pages in single syscall
+5. **Per-database buffer pools** - Reduces allocations for B-tree operations
+
+## Thread safety
+
+All components use fine-grained locking:
+
+- `Arc<RwLock<T>>` for read-heavy state (metadata, MVCC info)
+- `Arc<Mutex<T>>` for exclusive access (file I/O, commit serialization)
+- Lock-free atomics for counters (transaction IDs, metrics)
+
+<Warning>
+The database uses a **global commit lock** (src/core/transaction.rs:604) to serialize writes. This prevents write conflicts but limits write concurrency to one commit at a time. Reads are never blocked.
+</Warning>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Transactions" icon="arrow-right-arrow-left" href="/concepts/transactions">
+    Learn how ACID transactions work with commit/rollback
+  </Card>
+  <Card title="MVCC" icon="layer-group" href="/concepts/mvcc">
+    Understand snapshot isolation and version management
+  </Card>
+  <Card title="Storage Engine" icon="database" href="/concepts/storage-engine">
+    Deep dive into B-tree internals and copy-on-write
+  </Card>
+</CardGroup>

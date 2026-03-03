@@ -1,0 +1,581 @@
+---
+title: Collection
+description: Document operations for jasonisnthappy collections
+---
+
+The `Collection` struct provides methods for inserting, querying, updating, and deleting documents in a collection.
+
+## Getting a collection
+
+```rust
+let db = Database::open("my.db")?;
+let users = db.collection("users");
+```
+
+## Insert operations
+
+### `insert`
+
+Insert a single document into the collection.
+
+```rust
+pub fn insert(&self, doc: Value) -> Result<String>
+```
+
+<ParamField path="doc" type="Value" required>
+  The document to insert (must be a JSON object)
+</ParamField>
+
+**Returns:** `Result<String>` - The generated document ID
+
+**Example:**
+```rust
+use serde_json::json;
+
+let id = users.insert(json!({
+    "name": "Alice",
+    "age": 30,
+    "email": "alice@example.com"
+}))?;
+
+println!("Inserted with ID: {}", id);
+```
+
+---
+
+### `insert_many`
+
+Insert multiple documents in a single transaction.
+
+```rust
+pub fn insert_many(&self, docs: Vec<Value>) -> Result<Vec<String>>
+```
+
+<ParamField path="docs" type="Vec<Value>" required>
+  Vector of documents to insert
+</ParamField>
+
+**Returns:** `Result<Vec<String>>` - Vector of generated document IDs
+
+**Example:**
+```rust
+let docs = vec![
+    json!({"name": "Alice", "age": 30}),
+    json!({"name": "Bob", "age": 25}),
+    json!({"name": "Charlie", "age": 35}),
+];
+
+let ids = users.insert_many(docs)?;
+println!("Inserted {} documents", ids.len());
+```
+
+---
+
+### `insert_typed`
+
+Insert a typed document (using Rust structs with Serde).
+
+```rust
+pub fn insert_typed<T: Serialize>(&self, doc: &T) -> Result<String>
+```
+
+<ParamField path="doc" type="&T" required>
+  A reference to a serializable Rust struct
+</ParamField>
+
+**Example:**
+```rust
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize)]
+struct User {
+    name: String,
+    age: u32,
+    email: String,
+}
+
+let user = User {
+    name: "Alice".to_string(),
+    age: 30,
+    email: "alice@example.com".to_string(),
+};
+
+let id = users.insert_typed(&user)?;
+```
+
+## Query operations
+
+### `find_by_id`
+
+Find a document by its ID.
+
+```rust
+pub fn find_by_id(&self, id: &str) -> Result<Value>
+```
+
+<ParamField path="id" type="&str" required>
+  The document ID
+</ParamField>
+
+**Returns:** `Result<Value>` - The document
+
+**Example:**
+```rust
+let doc = users.find_by_id("user_123")?;
+println!("Name: {}", doc["name"]);
+```
+
+---
+
+### `find_all`
+
+Find all documents in the collection.
+
+```rust
+pub fn find_all(&self) -> Result<Vec<Value>>
+```
+
+**Returns:** `Result<Vec<Value>>` - All documents
+
+**Example:**
+```rust
+let all_users = users.find_all()?;
+for user in all_users {
+    println!("{}: {}", user["_id"], user["name"]);
+}
+```
+
+---
+
+### `find`
+
+Find documents matching a query.
+
+```rust
+pub fn find(&self, query: &str) -> Result<Vec<Value>>
+```
+
+<ParamField path="query" type="&str" required>
+  Query string (e.g., "age > 25 and city is \"NYC\"")
+</ParamField>
+
+**Returns:** `Result<Vec<Value>>` - Matching documents
+
+**Example:**
+```rust
+let adults = users.find("age >= 18")?;
+let ny_users = users.find("city is \"New York\" and age > 25")?;
+```
+
+---
+
+### `find_one`
+
+Find the first document matching a query.
+
+```rust
+pub fn find_one(&self, query: &str) -> Result<Option<Value>>
+```
+
+<ParamField path="query" type="&str" required>
+  Query string
+</ParamField>
+
+**Returns:** `Result<Option<Value>>` - The first matching document, or None
+
+**Example:**
+```rust
+if let Some(user) = users.find_one("email is \"alice@example.com\"")? {
+    println!("Found user: {}", user["name"]);
+}
+```
+
+---
+
+### `find_typed`
+
+Find documents matching a query and deserialize to Rust structs.
+
+```rust
+pub fn find_typed<T: DeserializeOwned>(&self, query: &str) -> Result<Vec<T>>
+```
+
+**Example:**
+```rust
+let adults: Vec<User> = users.find_typed("age >= 18")?;
+for user in adults {
+    println!("{} is {} years old", user.name, user.age);
+}
+```
+
+## Update operations
+
+### `update_by_id`
+
+Update a document by its ID.
+
+```rust
+pub fn update_by_id(&self, id: &str, updates: Value) -> Result<()>
+```
+
+<ParamField path="id" type="&str" required>
+  The document ID
+</ParamField>
+
+<ParamField path="updates" type="Value" required>
+  Fields to update (must be a JSON object)
+</ParamField>
+
+**Example:**
+```rust
+users.update_by_id("user_123", json!({
+    "age": 31,
+    "status": "active"
+}))?;
+```
+
+---
+
+### `update`
+
+Update all documents matching a query.
+
+```rust
+pub fn update(&self, query: &str, updates: Value) -> Result<usize>
+```
+
+<ParamField path="query" type="&str" required>
+  Query string
+</ParamField>
+
+<ParamField path="updates" type="Value" required>
+  Fields to update
+</ParamField>
+
+**Returns:** `Result<usize>` - Number of documents updated
+
+**Example:**
+```rust
+let count = users.update(
+    "city is \"NYC\"",
+    json!({"timezone": "America/New_York"})
+)?;
+println!("Updated {} users", count);
+```
+
+---
+
+### `update_one`
+
+Update the first document matching a query.
+
+```rust
+pub fn update_one(&self, query: &str, updates: Value) -> Result<bool>
+```
+
+**Returns:** `Result<bool>` - true if a document was updated
+
+**Example:**
+```rust
+let updated = users.update_one(
+    "status is \"pending\"",
+    json!({"status": "processing"})
+)?;
+
+if updated {
+    println!("Updated one pending user");
+}
+```
+
+## Upsert operations
+
+### `upsert_by_id`
+
+Update a document if it exists, insert if not.
+
+```rust
+pub fn upsert_by_id(&self, id: &str, doc: Value) -> Result<UpsertResult>
+```
+
+<ParamField path="id" type="&str" required>
+  The document ID
+</ParamField>
+
+<ParamField path="doc" type="Value" required>
+  The document data
+</ParamField>
+
+**Returns:** `Result<UpsertResult>` - Inserted(id) or Updated(id)
+
+**Example:**
+```rust
+use jasonisnthappy::UpsertResult;
+
+match users.upsert_by_id("user_123", json!({"name": "Alice", "age": 30}))? {
+    UpsertResult::Inserted(id) => println!("Inserted new user: {}", id),
+    UpsertResult::Updated(id) => println!("Updated existing user: {}", id),
+}
+```
+
+---
+
+### `upsert`
+
+Update first matching document if exists, insert if not.
+
+```rust
+pub fn upsert(&self, query: &str, doc: Value) -> Result<UpsertResult>
+```
+
+**Example:**
+```rust
+users.upsert(
+    "email is \"alice@example.com\"",
+    json!({"name": "Alice", "email": "alice@example.com", "age": 30})
+)?;
+```
+
+## Delete operations
+
+### `delete_by_id`
+
+Delete a document by its ID.
+
+```rust
+pub fn delete_by_id(&self, id: &str) -> Result<()>
+```
+
+<ParamField path="id" type="&str" required>
+  The document ID
+</ParamField>
+
+**Example:**
+```rust
+users.delete_by_id("user_123")?;
+```
+
+---
+
+### `delete`
+
+Delete all documents matching a query.
+
+```rust
+pub fn delete(&self, query: &str) -> Result<usize>
+```
+
+<ParamField path="query" type="&str" required>
+  Query string
+</ParamField>
+
+**Returns:** `Result<usize>` - Number of documents deleted
+
+**Example:**
+```rust
+let count = users.delete("status is \"inactive\" and lastSeen < \"2023-01-01\"")?;
+println!("Deleted {} inactive users", count);
+```
+
+---
+
+### `delete_one`
+
+Delete the first document matching a query.
+
+```rust
+pub fn delete_one(&self, query: &str) -> Result<bool>
+```
+
+**Returns:** `Result<bool>` - true if a document was deleted
+
+**Example:**
+```rust
+if users.delete_one("status is \"pending\"")? {
+    println!("Deleted one pending user");
+}
+```
+
+## Count operations
+
+### `count`
+
+Count all documents in the collection.
+
+```rust
+pub fn count(&self) -> Result<usize>
+```
+
+**Example:**
+```rust
+let total = users.count()?;
+println!("Total users: {}", total);
+```
+
+---
+
+### `count_with_query`
+
+Count documents matching a query.
+
+```rust
+pub fn count_with_query(&self, query: Option<&str>) -> Result<usize>
+```
+
+**Example:**
+```rust
+let adults = users.count_with_query(Some("age >= 18"))?;
+```
+
+## Aggregation operations
+
+### `distinct`
+
+Get distinct values for a field.
+
+```rust
+pub fn distinct(&self, field: &str) -> Result<Vec<Value>>
+```
+
+<ParamField path="field" type="&str" required>
+  Field name (supports nested fields with dot notation)
+</ParamField>
+
+**Example:**
+```rust
+let cities = users.distinct("city")?;
+for city in cities {
+    println!("City: {}", city);
+}
+```
+
+---
+
+### `count_distinct`
+
+Count distinct values for a field.
+
+```rust
+pub fn count_distinct(&self, field: &str) -> Result<usize>
+```
+
+**Example:**
+```rust
+let unique_cities = users.count_distinct("city")?;
+println!("Users are from {} different cities", unique_cities);
+```
+
+## Bulk operations
+
+### `bulk_write`
+
+Create a bulk write operation builder.
+
+```rust
+pub fn bulk_write(&self) -> BulkWrite<'_>
+```
+
+**Returns:** `BulkWrite` - A builder for bulk operations
+
+**Example:**
+```rust
+let result = users.bulk_write()
+    .insert(json!({"name": "Alice", "age": 30}))
+    .insert(json!({"name": "Bob", "age": 25}))
+    .update_one("name is \"Charlie\"", json!({"age": 36}))
+    .delete_one("status is \"inactive\"")
+    .execute()?;
+
+println!("Inserted: {}", result.inserted_count);
+println!("Updated: {}", result.updated_count);
+println!("Deleted: {}", result.deleted_count);
+```
+
+## Full-text search
+
+### `search`
+
+Perform full-text search on indexed fields.
+
+```rust
+pub fn search(&self, query: &str) -> Result<Vec<SearchResult>>
+```
+
+<ParamField path="query" type="&str" required>
+  Search query string (tokenized and matched)
+</ParamField>
+
+**Returns:** `Result<Vec<SearchResult>>` - Search results sorted by relevance
+
+**Example:**
+```rust
+// First create a text index
+db.create_text_index("posts", "search_idx", &["title", "body"])?;
+
+// Then search
+let posts = db.collection("posts");
+let results = posts.search("rust database")?;
+
+for result in results {
+    println!("Document: {} (score: {})", result.doc_id, result.score);
+    let doc = posts.find_by_id(&result.doc_id)?;
+    println!("{:?}", doc);
+}
+```
+
+## Watch for changes
+
+### `watch`
+
+Watch for changes to documents in the collection.
+
+```rust
+pub fn watch(&self) -> WatchBuilder<'_>
+```
+
+**Returns:** `WatchBuilder` - A builder for creating watchers
+
+**Example:**
+```rust
+let (handle, rx) = users.watch()
+    .filter("age > 18")
+    .subscribe()?;
+
+// In another thread or async task
+while let Ok(event) = rx.recv() {
+    match event.operation {
+        ChangeOperation::Insert => println!("New user: {}", event.doc_id),
+        ChangeOperation::Update => println!("Updated user: {}", event.doc_id),
+        ChangeOperation::Delete => println!("Deleted user: {}", event.doc_id),
+    }
+}
+
+// Automatically unsubscribes when handle is dropped
+```
+
+## Query builder
+
+### `query`
+
+Create a query builder for advanced queries.
+
+```rust
+pub fn query(&self) -> QueryBuilder<'_>
+```
+
+**Returns:** `QueryBuilder` - A builder for constructing queries
+
+See [QueryBuilder](/api/rust/query-builder) for details.
+
+## Aggregation pipeline
+
+### `aggregate`
+
+Create an aggregation pipeline.
+
+```rust
+pub fn aggregate(&self) -> AggregationPipeline<'_>
+```
+
+**Returns:** `AggregationPipeline` - A builder for aggregation pipelines
+
+See [AggregationPipeline](/api/rust/aggregation) for details.

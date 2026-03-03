@@ -1,0 +1,628 @@
+---
+title: Database
+description: Core database operations for jasonisnthappy Python bindings
+---
+
+The `Database` class represents a jasonisnthappy database instance.
+
+## Opening a database
+
+### open
+
+Opens a database at the specified path.
+
+```python
+@staticmethod
+def open(path: str) -> Database
+```
+
+<ParamField path="path" type="str" required>
+  Path to the database file
+</ParamField>
+
+<ResponseField name="Database" type="Database">
+  Database instance
+</ResponseField>
+
+**Example:**
+
+```python
+from jasonisnthappy import Database
+
+db = Database.open("./my_database.db")
+try:
+    # Use database
+    pass
+finally:
+    db.close()
+```
+
+### open_with_options
+
+Opens a database with custom options.
+
+```python
+@staticmethod
+def open_with_options(path: str, options: CDatabaseOptions) -> Database
+```
+
+<ParamField path="path" type="str" required>
+  Path to the database file
+</ParamField>
+
+<ParamField path="options" type="CDatabaseOptions" required>
+  Custom database configuration options
+</ParamField>
+
+<ResponseField name="Database" type="Database">
+  Database instance
+</ResponseField>
+
+**Example:**
+
+```python
+opts = Database.default_database_options()
+opts.read_only = True
+opts.cache_size = 2000
+
+db = Database.open_with_options("./my_database.db", opts)
+```
+
+### default_database_options
+
+Returns the default database options.
+
+```python
+@staticmethod
+def default_database_options() -> CDatabaseOptions
+```
+
+<ResponseField name="CDatabaseOptions" type="CDatabaseOptions">
+  Default database configuration
+</ResponseField>
+
+## Database management
+
+### close
+
+Closes the database and frees associated resources.
+
+```python
+def close() -> None
+```
+
+**Example:**
+
+```python
+db.close()
+```
+
+### Context manager support
+
+Use the `with` statement for automatic resource cleanup.
+
+**Example:**
+
+```python
+with Database.open("./my_database.db") as db:
+    # Database is automatically closed when exiting the block
+    tx = db.begin_transaction()
+    # ...
+```
+
+### begin_transaction
+
+Begins a new transaction.
+
+```python
+def begin_transaction() -> Transaction
+```
+
+<ResponseField name="Transaction" type="Transaction">
+  Transaction instance
+</ResponseField>
+
+**Example:**
+
+```python
+tx = db.begin_transaction()
+try:
+    # Perform operations
+    tx.commit()
+except Exception:
+    tx.rollback()
+    raise
+```
+
+### get_collection
+
+Gets a collection reference for non-transactional operations.
+
+```python
+def get_collection(name: str) -> Collection
+```
+
+<ParamField path="name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="Collection" type="Collection">
+  Collection handle
+</ResponseField>
+
+**Example:**
+
+```python
+coll = db.get_collection("users")
+try:
+    doc_id = coll.insert({"name": "Alice", "age": 30})
+finally:
+    coll.close()
+```
+
+## Configuration
+
+### set_transaction_config
+
+Sets the transaction retry configuration.
+
+```python
+def set_transaction_config(config: CTransactionConfig) -> None
+```
+
+<ParamField path="config" type="CTransactionConfig" required>
+  Transaction configuration with retry settings
+</ParamField>
+
+**Example:**
+
+```python
+config = Database.default_transaction_config()
+config.max_retries = 5
+config.retry_backoff_base_ms = 10
+db.set_transaction_config(config)
+```
+
+### get_transaction_config
+
+Gets the current transaction configuration.
+
+```python
+def get_transaction_config() -> CTransactionConfig
+```
+
+<ResponseField name="CTransactionConfig" type="CTransactionConfig">
+  Current transaction configuration
+</ResponseField>
+
+### set_auto_checkpoint_threshold
+
+Sets the auto-checkpoint threshold in WAL frames.
+
+```python
+def set_auto_checkpoint_threshold(threshold: int) -> None
+```
+
+<ParamField path="threshold" type="int" required>
+  Number of WAL frames before automatic checkpoint
+</ParamField>
+
+## Database information
+
+### get_path
+
+Gets the database file path.
+
+```python
+def get_path() -> str
+```
+
+<ResponseField name="str" type="str">
+  Database file path
+</ResponseField>
+
+### is_read_only
+
+Checks if the database is read-only.
+
+```python
+def is_read_only() -> bool
+```
+
+<ResponseField name="bool" type="bool">
+  True if the database is read-only
+</ResponseField>
+
+### list_collections
+
+Lists all collections in the database.
+
+```python
+def list_collections() -> List[str]
+```
+
+<ResponseField name="List[str]" type="List[str]">
+  List of collection names
+</ResponseField>
+
+**Example:**
+
+```python
+collections = db.list_collections()
+for name in collections:
+    print(f"Collection: {name}")
+```
+
+### collection_stats
+
+Gets statistics for a collection.
+
+```python
+def collection_stats(collection_name: str) -> Dict[str, Any]
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="Dict[str, Any]" type="Dict[str, Any]">
+  Collection statistics
+</ResponseField>
+
+### database_info
+
+Gets database information.
+
+```python
+def database_info() -> Dict[str, Any]
+```
+
+<ResponseField name="Dict[str, Any]" type="Dict[str, Any]">
+  Database information including path, size, collections, etc.
+</ResponseField>
+
+### max_bulk_operations
+
+Returns the maximum number of bulk operations allowed.
+
+```python
+def max_bulk_operations() -> int
+```
+
+<ResponseField name="int" type="int">
+  Maximum bulk operations limit
+</ResponseField>
+
+### max_document_size
+
+Returns the maximum document size in bytes.
+
+```python
+def max_document_size() -> int
+```
+
+<ResponseField name="int" type="int">
+  Maximum document size in bytes
+</ResponseField>
+
+### max_request_body_size
+
+Returns the maximum HTTP request body size in bytes.
+
+```python
+def max_request_body_size() -> int
+```
+
+<ResponseField name="int" type="int">
+  Maximum request body size in bytes
+</ResponseField>
+
+## Index management
+
+### create_index
+
+Creates a single-field index.
+
+```python
+def create_index(collection_name: str, index_name: str, field: str, unique: bool = False) -> None
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="index_name" type="str" required>
+  Name for the index
+</ParamField>
+
+<ParamField path="field" type="str" required>
+  Field to index
+</ParamField>
+
+<ParamField path="unique" type="bool" default="False">
+  Whether the index should enforce uniqueness
+</ParamField>
+
+**Example:**
+
+```python
+db.create_index("users", "email_idx", "email", unique=True)
+```
+
+### create_compound_index
+
+Creates a compound index on multiple fields.
+
+```python
+def create_compound_index(collection_name: str, index_name: str, fields: List[str], unique: bool = False) -> None
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="index_name" type="str" required>
+  Name for the index
+</ParamField>
+
+<ParamField path="fields" type="List[str]" required>
+  Fields to include in the compound index
+</ParamField>
+
+<ParamField path="unique" type="bool" default="False">
+  Whether the index should enforce uniqueness
+</ParamField>
+
+**Example:**
+
+```python
+db.create_compound_index("users", "name_age_idx", ["name", "age"])
+```
+
+### create_text_index
+
+Creates a full-text search index.
+
+```python
+def create_text_index(collection_name: str, index_name: str, field: str) -> None
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="index_name" type="str" required>
+  Name for the index
+</ParamField>
+
+<ParamField path="field" type="str" required>
+  Text field to index
+</ParamField>
+
+**Example:**
+
+```python
+db.create_text_index("articles", "content_text_idx", "content")
+```
+
+### drop_index
+
+Drops an index from a collection.
+
+```python
+def drop_index(collection_name: str, index_name: str) -> None
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="index_name" type="str" required>
+  Name of the index to drop
+</ParamField>
+
+**Example:**
+
+```python
+db.drop_index("users", "email_idx")
+```
+
+### list_indexes
+
+Lists all indexes for a collection.
+
+```python
+def list_indexes(collection_name: str) -> List[Dict[str, Any]]
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="List[Dict[str, Any]]" type="List[Dict[str, Any]]">
+  List of index metadata
+</ResponseField>
+
+**Example:**
+
+```python
+indexes = db.list_indexes("users")
+for idx in indexes:
+    print(f"Index: {idx['name']}, Fields: {idx['fields']}, Unique: {idx['unique']}")
+```
+
+## Schema validation
+
+### set_schema
+
+Sets a JSON schema for validation.
+
+```python
+def set_schema(collection_name: str, schema: Dict[str, Any]) -> None
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="schema" type="Dict[str, Any]" required>
+  JSON schema for validation
+</ParamField>
+
+**Example:**
+
+```python
+schema = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "age": {"type": "number"},
+        "email": {"type": "string", "format": "email"},
+    },
+    "required": ["name", "email"],
+}
+db.set_schema("users", schema)
+```
+
+### get_schema
+
+Gets the JSON schema for a collection.
+
+```python
+def get_schema(collection_name: str) -> Optional[Dict[str, Any]]
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+<ResponseField name="Optional[Dict[str, Any]]" type="Optional[Dict[str, Any]]">
+  JSON schema, or None if no schema is set
+</ResponseField>
+
+### remove_schema
+
+Removes the JSON schema from a collection.
+
+```python
+def remove_schema(collection_name: str) -> None
+```
+
+<ParamField path="collection_name" type="str" required>
+  Name of the collection
+</ParamField>
+
+## Maintenance
+
+### checkpoint
+
+Performs a manual WAL checkpoint.
+
+```python
+def checkpoint() -> None
+```
+
+### backup
+
+Creates a backup of the database.
+
+```python
+def backup(dest_path: str) -> None
+```
+
+<ParamField path="dest_path" type="str" required>
+  Destination path for the backup file
+</ParamField>
+
+**Example:**
+
+```python
+db.backup("/backups/my_database_backup.db")
+```
+
+### verify_backup
+
+Verifies the integrity of a backup and returns backup info.
+
+```python
+def verify_backup(backup_path: str) -> Dict[str, Any]
+```
+
+<ParamField path="backup_path" type="str" required>
+  Path to the backup file
+</ParamField>
+
+<ResponseField name="Dict[str, Any]" type="Dict[str, Any]">
+  Backup verification information
+</ResponseField>
+
+### garbage_collect
+
+Performs garbage collection and returns stats.
+
+```python
+def garbage_collect() -> Dict[str, Any]
+```
+
+<ResponseField name="Dict[str, Any]" type="Dict[str, Any]">
+  Garbage collection statistics
+</ResponseField>
+
+### metrics
+
+Gets database metrics.
+
+```python
+def metrics() -> Dict[str, Any]
+```
+
+<ResponseField name="Dict[str, Any]" type="Dict[str, Any]">
+  Database metrics including reads, writes, cache hits, etc.
+</ResponseField>
+
+**Example:**
+
+```python
+metrics = db.metrics()
+print(f"Total reads: {metrics['reads']}")
+print(f"Total writes: {metrics['writes']}")
+```
+
+### frame_count
+
+Gets the number of WAL frames.
+
+```python
+def frame_count() -> int
+```
+
+<ResponseField name="int" type="int">
+  Number of WAL frames
+</ResponseField>
+
+## Web UI
+
+### start_web_ui
+
+Starts the web UI server at the given address.
+
+```python
+def start_web_ui(addr: str) -> WebServer
+```
+
+<ParamField path="addr" type="str" required>
+  Address to bind the web server to (e.g., "127.0.0.1:8080")
+</ParamField>
+
+<ResponseField name="WebServer" type="WebServer">
+  WebServer handle to control the server
+</ResponseField>
+
+**Example:**
+
+```python
+server = db.start_web_ui("127.0.0.1:8080")
+print("Web UI available at http://127.0.0.1:8080")
+# ... later ...
+server.stop()
+```

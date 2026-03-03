@@ -1,0 +1,740 @@
+---
+title: Collection
+description: Non-transactional collection operations for jasonisnthappy Python bindings
+---
+
+The `Collection` class represents a non-transactional collection handle.
+
+## Collection management
+
+### close
+
+Frees the collection handle.
+
+```python
+def close() -> None
+```
+
+**Example:**
+
+```python
+coll = db.get_collection("users")
+try:
+    # Use collection
+    pass
+finally:
+    coll.close()
+```
+
+### Context manager support
+
+Use the `with` statement for automatic resource cleanup.
+
+**Example:**
+
+```python
+with db.get_collection("users") as coll:
+    doc_id = coll.insert({"name": "Bob", "age": 25})
+    # Collection is automatically closed when exiting the block
+```
+
+### name
+
+Gets the collection name.
+
+```python
+def name() -> str
+```
+
+<ResponseField name="str" type="str">
+  Collection name
+</ResponseField>
+
+## Basic CRUD operations
+
+### insert
+
+Inserts a document.
+
+```python
+def insert(doc: Dict[str, Any]) -> str
+```
+
+<ParamField path="doc" type="Dict[str, Any]" required>
+  Document to insert
+</ParamField>
+
+<ResponseField name="str" type="str">
+  ID of the inserted document
+</ResponseField>
+
+**Example:**
+
+```python
+coll = db.get_collection("users")
+doc_id = coll.insert({"name": "Alice", "age": 30})
+print(f"Inserted: {doc_id}")
+```
+
+### find_by_id
+
+Finds a document by ID.
+
+```python
+def find_by_id(doc_id: str) -> Optional[Dict[str, Any]]
+```
+
+<ParamField path="doc_id" type="str" required>
+  Document ID to find
+</ParamField>
+
+<ResponseField name="Optional[Dict[str, Any]]" type="Optional[Dict[str, Any]]">
+  Document if found, None otherwise
+</ResponseField>
+
+**Example:**
+
+```python
+doc = coll.find_by_id("user123")
+if doc:
+    print(f"Found: {doc}")
+```
+
+### update_by_id
+
+Updates a document by ID.
+
+```python
+def update_by_id(doc_id: str, doc: Dict[str, Any]) -> None
+```
+
+<ParamField path="doc_id" type="str" required>
+  Document ID to update
+</ParamField>
+
+<ParamField path="doc" type="Dict[str, Any]" required>
+  Updated document data
+</ParamField>
+
+**Example:**
+
+```python
+coll.update_by_id("user123", {"name": "Alice Smith", "age": 31})
+```
+
+### delete_by_id
+
+Deletes a document by ID.
+
+```python
+def delete_by_id(doc_id: str) -> None
+```
+
+<ParamField path="doc_id" type="str" required>
+  Document ID to delete
+</ParamField>
+
+**Example:**
+
+```python
+coll.delete_by_id("user123")
+```
+
+### find_all
+
+Finds all documents.
+
+```python
+def find_all() -> List[Dict[str, Any]]
+```
+
+<ResponseField name="List[Dict[str, Any]]" type="List[Dict[str, Any]]">
+  List of all documents
+</ResponseField>
+
+**Example:**
+
+```python
+all_docs = coll.find_all()
+for doc in all_docs:
+    print(doc)
+```
+
+### count
+
+Counts all documents.
+
+```python
+def count() -> int
+```
+
+<ResponseField name="int" type="int">
+  Number of documents
+</ResponseField>
+
+**Example:**
+
+```python
+total = coll.count()
+print(f"Total documents: {total}")
+```
+
+## Query and filter operations
+
+### find
+
+Finds documents matching a filter.
+
+```python
+def find(filter_str: str) -> List[Dict[str, Any]]
+```
+
+<ParamField path="filter_str" type="str" required>
+  Query filter expression
+</ParamField>
+
+<ResponseField name="List[Dict[str, Any]]" type="List[Dict[str, Any]]">
+  List of matching documents
+</ResponseField>
+
+**Example:**
+
+```python
+results = coll.find("age > 25")
+for user in results:
+    print(user)
+```
+
+### find_one
+
+Finds first document matching a filter.
+
+```python
+def find_one(filter_str: str) -> Optional[Dict[str, Any]]
+```
+
+<ParamField path="filter_str" type="str" required>
+  Query filter expression
+</ParamField>
+
+<ResponseField name="Optional[Dict[str, Any]]" type="Optional[Dict[str, Any]]">
+  First matching document, or None
+</ResponseField>
+
+**Example:**
+
+```python
+user = coll.find_one("email == 'alice@example.com'")
+if user:
+    print(f"Found: {user}")
+```
+
+### update
+
+Updates all documents matching a filter. Returns count updated.
+
+```python
+def update(filter_str: str, update: Dict[str, Any]) -> int
+```
+
+<ParamField path="filter_str" type="str" required>
+  Query filter expression
+</ParamField>
+
+<ParamField path="update" type="Dict[str, Any]" required>
+  Update data
+</ParamField>
+
+<ResponseField name="int" type="int">
+  Number of documents updated
+</ResponseField>
+
+**Example:**
+
+```python
+count = coll.update("age > 25", {"verified": True})
+print(f"Updated {count} documents")
+```
+
+### update_one
+
+Updates first document matching a filter. Returns True if updated.
+
+```python
+def update_one(filter_str: str, update: Dict[str, Any]) -> bool
+```
+
+<ParamField path="filter_str" type="str" required>
+  Query filter expression
+</ParamField>
+
+<ParamField path="update" type="Dict[str, Any]" required>
+  Update data
+</ParamField>
+
+<ResponseField name="bool" type="bool">
+  True if a document was updated
+</ResponseField>
+
+**Example:**
+
+```python
+updated = coll.update_one("email == 'alice@example.com'", {"verified": True})
+if updated:
+    print("Document updated")
+```
+
+### delete
+
+Deletes all documents matching a filter. Returns count deleted.
+
+```python
+def delete(filter_str: str) -> int
+```
+
+<ParamField path="filter_str" type="str" required>
+  Query filter expression
+</ParamField>
+
+<ResponseField name="int" type="int">
+  Number of documents deleted
+</ResponseField>
+
+**Example:**
+
+```python
+count = coll.delete("age < 18")
+print(f"Deleted {count} documents")
+```
+
+### delete_one
+
+Deletes first document matching a filter. Returns True if deleted.
+
+```python
+def delete_one(filter_str: str) -> bool
+```
+
+<ParamField path="filter_str" type="str" required>
+  Query filter expression
+</ParamField>
+
+<ResponseField name="bool" type="bool">
+  True if a document was deleted
+</ResponseField>
+
+**Example:**
+
+```python
+deleted = coll.delete_one("email == 'test@example.com'")
+if deleted:
+    print("Document deleted")
+```
+
+## Upsert operations
+
+### upsert_by_id
+
+Upserts a document by ID. Returns UpsertResult with id and inserted flag.
+
+```python
+def upsert_by_id(doc_id: str, doc: Dict[str, Any]) -> UpsertResult
+```
+
+<ParamField path="doc_id" type="str" required>
+  Document ID
+</ParamField>
+
+<ParamField path="doc" type="Dict[str, Any]" required>
+  Document data
+</ParamField>
+
+<ResponseField name="UpsertResult" type="UpsertResult">
+  Result containing id and whether it was inserted or updated
+</ResponseField>
+
+**Example:**
+
+```python
+result = coll.upsert_by_id("user123", {"name": "Alice", "age": 30})
+if result.inserted:
+    print(f"Inserted new document: {result.id}")
+else:
+    print(f"Updated existing document: {result.id}")
+```
+
+### upsert
+
+Upserts a document matching a filter. Returns UpsertResult with id and inserted flag.
+
+```python
+def upsert(filter_str: str, doc: Dict[str, Any]) -> UpsertResult
+```
+
+<ParamField path="filter_str" type="str" required>
+  Query filter expression
+</ParamField>
+
+<ParamField path="doc" type="Dict[str, Any]" required>
+  Document data
+</ParamField>
+
+<ResponseField name="UpsertResult" type="UpsertResult">
+  Result containing id and whether it was inserted or updated
+</ResponseField>
+
+**Example:**
+
+```python
+result = coll.upsert("email == 'alice@example.com'", {
+    "name": "Alice",
+    "email": "alice@example.com",
+    "age": 30
+})
+```
+
+## Bulk operations
+
+### insert_many
+
+Inserts multiple documents. Returns list of IDs.
+
+```python
+def insert_many(docs: List[Dict[str, Any]]) -> List[str]
+```
+
+<ParamField path="docs" type="List[Dict[str, Any]]" required>
+  List of documents to insert
+</ParamField>
+
+<ResponseField name="List[str]" type="List[str]">
+  List of inserted document IDs
+</ResponseField>
+
+**Example:**
+
+```python
+ids = coll.insert_many([
+    {"name": "Alice", "age": 30},
+    {"name": "Bob", "age": 25},
+    {"name": "Charlie", "age": 35}
+])
+print(f"Inserted {len(ids)} documents")
+```
+
+### bulk_write
+
+Executes multiple operations in a transaction.
+
+```python
+def bulk_write(operations: List[Dict[str, Any]], ordered: bool = True) -> Dict[str, Any]
+```
+
+<ParamField path="operations" type="List[Dict[str, Any]]" required>
+  List of bulk operations
+</ParamField>
+
+<ParamField path="ordered" type="bool" default="True">
+  Whether to execute operations in order
+</ParamField>
+
+<ResponseField name="Dict[str, Any]" type="Dict[str, Any]">
+  Result with statistics for each operation type
+</ResponseField>
+
+**Example:**
+
+```python
+operations = [
+    {"op": "insert", "doc": {"name": "Alice", "age": 30}},
+    {"op": "update", "filter": "age > 25", "update": {"verified": True}},
+    {"op": "delete", "filter": "age < 18"}
+]
+result = coll.bulk_write(operations)
+print(f"Bulk write result: {result}")
+```
+
+## Advanced operations
+
+### distinct
+
+Gets distinct values for a field.
+
+```python
+def distinct(field: str) -> List[Any]
+```
+
+<ParamField path="field" type="str" required>
+  Field name
+</ParamField>
+
+<ResponseField name="List[Any]" type="List[Any]">
+  List of distinct values
+</ResponseField>
+
+**Example:**
+
+```python
+ages = coll.distinct("age")
+print(f"Distinct ages: {ages}")
+```
+
+### count_distinct
+
+Counts distinct values for a field.
+
+```python
+def count_distinct(field: str) -> int
+```
+
+<ParamField path="field" type="str" required>
+  Field name
+</ParamField>
+
+<ResponseField name="int" type="int">
+  Number of distinct values
+</ResponseField>
+
+**Example:**
+
+```python
+count = coll.count_distinct("city")
+print(f"Number of unique cities: {count}")
+```
+
+### search
+
+Performs full-text search.
+
+```python
+def search(query: str) -> List[Dict[str, Any]]
+```
+
+<ParamField path="query" type="str" required>
+  Search query
+</ParamField>
+
+<ResponseField name="List[Dict[str, Any]]" type="List[Dict[str, Any]]">
+  List of matching documents
+</ResponseField>
+
+**Example:**
+
+```python
+results = coll.search("python database")
+for doc in results:
+    print(doc)
+```
+
+### count_with_query
+
+Counts documents matching a filter.
+
+```python
+def count_with_query(filter_str: str) -> int
+```
+
+<ParamField path="filter_str" type="str" required>
+  Query filter expression
+</ParamField>
+
+<ResponseField name="int" type="int">
+  Number of matching documents
+</ResponseField>
+
+**Example:**
+
+```python
+count = coll.count_with_query("age > 25")
+print(f"Users over 25: {count}")
+```
+
+### aggregate
+
+Executes an aggregation pipeline.
+
+```python
+def aggregate(pipeline: List[Dict[str, Any]]) -> List[Dict[str, Any]]
+```
+
+<ParamField path="pipeline" type="List[Dict[str, Any]]" required>
+  Aggregation pipeline stages
+</ParamField>
+
+<ResponseField name="List[Dict[str, Any]]" type="List[Dict[str, Any]]">
+  Aggregation results
+</ResponseField>
+
+**Example:**
+
+```python
+pipeline = [
+    {"$match": {"age": {">=": 18}}},
+    {"$group": {"_id": "$city", "count": {"$sum": 1}}},
+    {"$sort": {"count": -1}}
+]
+results = coll.aggregate(pipeline)
+for result in results:
+    print(result)
+```
+
+## Query builder helpers
+
+### query_with_options
+
+Executes a query with all options.
+
+```python
+def query_with_options(
+    filter_str: Optional[str] = None,
+    sort_field: Optional[str] = None,
+    sort_asc: bool = True,
+    limit: int = 0,
+    skip: int = 0,
+    project_fields: Optional[List[str]] = None,
+    exclude_fields: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]
+```
+
+<ParamField path="filter_str" type="Optional[str]">
+  Query filter expression
+</ParamField>
+
+<ParamField path="sort_field" type="Optional[str]">
+  Field to sort by
+</ParamField>
+
+<ParamField path="sort_asc" type="bool" default="True">
+  Sort in ascending order
+</ParamField>
+
+<ParamField path="limit" type="int" default="0">
+  Maximum number of results (0 = no limit)
+</ParamField>
+
+<ParamField path="skip" type="int" default="0">
+  Number of results to skip
+</ParamField>
+
+<ParamField path="project_fields" type="Optional[List[str]]">
+  Fields to include in results
+</ParamField>
+
+<ParamField path="exclude_fields" type="Optional[List[str]]">
+  Fields to exclude from results
+</ParamField>
+
+<ResponseField name="List[Dict[str, Any]]" type="List[Dict[str, Any]]">
+  List of matching documents
+</ResponseField>
+
+**Example:**
+
+```python
+results = coll.query_with_options(
+    filter_str="age > 25",
+    sort_field="age",
+    sort_asc=False,
+    limit=10,
+    skip=5,
+    project_fields=["name", "age"]
+)
+```
+
+### query_count
+
+Counts documents with query options.
+
+```python
+def query_count(filter_str: Optional[str] = None, skip: int = 0, limit: int = 0) -> int
+```
+
+<ParamField path="filter_str" type="Optional[str]">
+  Query filter expression
+</ParamField>
+
+<ParamField path="skip" type="int" default="0">
+  Number of results to skip
+</ParamField>
+
+<ParamField path="limit" type="int" default="0">
+  Maximum number of results to count
+</ParamField>
+
+<ResponseField name="int" type="int">
+  Number of matching documents
+</ResponseField>
+
+### query_first
+
+Gets the first document matching a query.
+
+```python
+def query_first(
+    filter_str: Optional[str] = None,
+    sort_field: Optional[str] = None,
+    sort_asc: bool = True,
+) -> Optional[Dict[str, Any]]
+```
+
+<ParamField path="filter_str" type="Optional[str]">
+  Query filter expression
+</ParamField>
+
+<ParamField path="sort_field" type="Optional[str]">
+  Field to sort by
+</ParamField>
+
+<ParamField path="sort_asc" type="bool" default="True">
+  Sort in ascending order
+</ParamField>
+
+<ResponseField name="Optional[Dict[str, Any]]" type="Optional[Dict[str, Any]]">
+  First matching document, or None
+</ResponseField>
+
+**Example:**
+
+```python
+oldest = coll.query_first(sort_field="age", sort_asc=False)
+if oldest:
+    print(f"Oldest user: {oldest}")
+```
+
+## Watch and change streams
+
+### watch
+
+Starts watching for changes on the collection.
+
+```python
+def watch(
+    callback: Callable[[str, str, Optional[Dict[str, Any]]], None],
+    filter_str: Optional[str] = None,
+) -> WatchHandle
+```
+
+<ParamField path="callback" type="Callable[[str, str, Optional[Dict[str, Any]]], None]" required>
+  Callback function receiving (operation, doc_id, document)
+</ParamField>
+
+<ParamField path="filter_str" type="Optional[str]">
+  Optional filter for watched events
+</ParamField>
+
+<ResponseField name="WatchHandle" type="WatchHandle">
+  Handle to stop the watch
+</ResponseField>
+
+**Example:**
+
+```python
+def on_change(op, doc_id, doc):
+    print(f"{op}: {doc_id}")
+    if doc:
+        print(f"  Data: {doc}")
+
+handle = coll.watch(on_change)
+# ... later ...
+handle.stop()
+```

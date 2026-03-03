@@ -1,0 +1,741 @@
+---
+title: Types
+description: TypeScript type definitions and interfaces
+---
+
+## Core types
+
+### Document
+
+Base interface for all documents stored in the database.
+
+```typescript
+export interface Document {
+  _id: string;
+  [key: string]: unknown;
+}
+```
+
+<ParamField path="_id" type="string" required>
+  Unique identifier for the document (auto-generated on insert)
+</ParamField>
+
+<ParamField path="[key: string]" type="unknown">
+  Additional fields with any values
+</ParamField>
+
+**Example**
+
+```typescript
+import { Document } from '@sohzm/jasonisnthappy';
+
+interface User extends Document {
+  _id: string;
+  name: string;
+  email: string;
+  age: number;
+  tags: string[];
+}
+```
+
+## Configuration types
+
+### DatabaseOptions
+
+Configuration options for opening a database.
+
+```typescript
+export interface DatabaseOptions {
+  cacheSize?: number;
+  autoCheckpointThreshold?: number;
+  filePermissions?: number;
+  readOnly?: boolean;
+  maxBulkOperations?: number;
+  maxDocumentSize?: number;
+  maxRequestBodySize?: number;
+}
+```
+
+<ParamField path="cacheSize" type="number">
+  Size of the page cache in bytes. Larger cache improves read performance.
+</ParamField>
+
+<ParamField path="autoCheckpointThreshold" type="number">
+  Number of pages written before automatic checkpoint triggers.
+</ParamField>
+
+<ParamField path="filePermissions" type="number">
+  Unix file permissions for the database file (e.g., `0o644`).
+</ParamField>
+
+<ParamField path="readOnly" type="boolean">
+  Open database in read-only mode if `true`.
+</ParamField>
+
+<ParamField path="maxBulkOperations" type="number">
+  Maximum number of operations allowed in a single bulk write.
+</ParamField>
+
+<ParamField path="maxDocumentSize" type="number">
+  Maximum size of a single document in bytes.
+</ParamField>
+
+<ParamField path="maxRequestBodySize" type="number">
+  Maximum request body size for web server (if enabled).
+</ParamField>
+
+**Example**
+
+```typescript
+const options: DatabaseOptions = {
+  cacheSize: 1024 * 1024 * 100, // 100MB
+  autoCheckpointThreshold: 1000,
+  readOnly: false,
+  maxBulkOperations: 10000,
+  maxDocumentSize: 1024 * 1024 * 10 // 10MB
+};
+
+const db = Database.openWithOptions('./data.db', options);
+```
+
+### TransactionConfig
+
+Configuration for transaction retry behavior.
+
+```typescript
+export interface TransactionConfig {
+  maxRetries?: number;
+  retryBackoffBaseMs?: number;
+  maxRetryBackoffMs?: number;
+}
+```
+
+<ParamField path="maxRetries" type="number">
+  Maximum number of retry attempts for conflicted transactions.
+</ParamField>
+
+<ParamField path="retryBackoffBaseMs" type="number">
+  Base delay in milliseconds for exponential backoff.
+</ParamField>
+
+<ParamField path="maxRetryBackoffMs" type="number">
+  Maximum delay in milliseconds between retries.
+</ParamField>
+
+**Example**
+
+```typescript
+const config: TransactionConfig = {
+  maxRetries: 5,
+  retryBackoffBaseMs: 10,
+  maxRetryBackoffMs: 1000
+};
+
+db.setTransactionConfig(config);
+```
+
+## Result types
+
+### UpsertResult
+
+Result of an upsert operation.
+
+```typescript
+export interface UpsertResult {
+  id: string;
+  inserted: boolean;
+}
+```
+
+<ResponseField name="id" type="string">
+  The document ID
+</ResponseField>
+
+<ResponseField name="inserted" type="boolean">
+  `true` if document was inserted, `false` if it was updated
+</ResponseField>
+
+### BulkWriteResult
+
+Result of a bulk write operation.
+
+```typescript
+export interface BulkWriteResult {
+  inserted_count: number;
+  updated_count: number;
+  deleted_count: number;
+  inserted_ids: string[];
+  errors: BulkWriteError[];
+}
+```
+
+<ResponseField name="inserted_count" type="number">
+  Number of documents inserted
+</ResponseField>
+
+<ResponseField name="updated_count" type="number">
+  Number of documents updated
+</ResponseField>
+
+<ResponseField name="deleted_count" type="number">
+  Number of documents deleted
+</ResponseField>
+
+<ResponseField name="inserted_ids" type="string[]">
+  Array of IDs for inserted documents
+</ResponseField>
+
+<ResponseField name="errors" type="BulkWriteError[]">
+  Array of errors encountered
+</ResponseField>
+
+### BulkWriteError
+
+Error information from bulk write operations.
+
+```typescript
+export interface BulkWriteError {
+  operation_index: number;
+  message: string;
+}
+```
+
+<ResponseField name="operation_index" type="number">
+  Index of the operation that failed
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  Error message
+</ResponseField>
+
+### SearchResult
+
+Result from full-text search operations.
+
+```typescript
+export interface SearchResult {
+  doc_id: string;
+  score: number;
+}
+```
+
+<ResponseField name="doc_id" type="string">
+  Document ID of the matching document
+</ResponseField>
+
+<ResponseField name="score" type="number">
+  Relevance score (higher is more relevant)
+</ResponseField>
+
+### GarbageCollectResult
+
+Result of garbage collection operation.
+
+```typescript
+export interface GarbageCollectResult {
+  pages_freed: number;
+  bytes_freed: number;
+}
+```
+
+<ResponseField name="pages_freed" type="number">
+  Number of pages reclaimed
+</ResponseField>
+
+<ResponseField name="bytes_freed" type="number">
+  Bytes of storage reclaimed
+</ResponseField>
+
+## Information types
+
+### DatabaseInfo
+
+Comprehensive database information.
+
+```typescript
+export interface DatabaseInfo {
+  path: string;
+  version: number;
+  num_pages: number;
+  file_size: number;
+  collections: CollectionInfo[];
+  total_documents: number;
+  read_only: boolean;
+}
+```
+
+<ResponseField name="path" type="string">
+  Database file path
+</ResponseField>
+
+<ResponseField name="version" type="number">
+  Database schema version
+</ResponseField>
+
+<ResponseField name="num_pages" type="number">
+  Total number of pages in the database
+</ResponseField>
+
+<ResponseField name="file_size" type="number">
+  Database file size in bytes
+</ResponseField>
+
+<ResponseField name="collections" type="CollectionInfo[]">
+  Array of collection information
+</ResponseField>
+
+<ResponseField name="total_documents" type="number">
+  Total number of documents across all collections
+</ResponseField>
+
+<ResponseField name="read_only" type="boolean">
+  Whether database is in read-only mode
+</ResponseField>
+
+### CollectionInfo
+
+Information about a collection.
+
+```typescript
+export interface CollectionInfo {
+  name: string;
+  document_count: number;
+  btree_root: number;
+  indexes: IndexInfo[];
+}
+```
+
+<ResponseField name="name" type="string">
+  Collection name
+</ResponseField>
+
+<ResponseField name="document_count" type="number">
+  Number of documents in the collection
+</ResponseField>
+
+<ResponseField name="btree_root" type="number">
+  Root page number of the B-tree index
+</ResponseField>
+
+<ResponseField name="indexes" type="IndexInfo[]">
+  Array of index information
+</ResponseField>
+
+### IndexInfo
+
+Information about an index.
+
+```typescript
+export interface IndexInfo {
+  name: string;
+  fields: string[];
+  unique: boolean;
+  index_type: 'btree' | 'text';
+}
+```
+
+<ResponseField name="name" type="string">
+  Index name
+</ResponseField>
+
+<ResponseField name="fields" type="string[]">
+  Array of field names in the index
+</ResponseField>
+
+<ResponseField name="unique" type="boolean">
+  Whether the index enforces uniqueness
+</ResponseField>
+
+<ResponseField name="index_type" type="'btree' | 'text'">
+  Type of index: `'btree'` for B-tree index, `'text'` for full-text search
+</ResponseField>
+
+### BackupInfo
+
+Information about a backup file.
+
+```typescript
+export interface BackupInfo {
+  path: string;
+  version: number;
+  collections: string[];
+  total_documents: number;
+}
+```
+
+<ResponseField name="path" type="string">
+  Backup file path
+</ResponseField>
+
+<ResponseField name="version" type="number">
+  Database version
+</ResponseField>
+
+<ResponseField name="collections" type="string[]">
+  Array of collection names in the backup
+</ResponseField>
+
+<ResponseField name="total_documents" type="number">
+  Total number of documents in the backup
+</ResponseField>
+
+### MetricsSnapshot
+
+Database operation metrics.
+
+```typescript
+export interface MetricsSnapshot {
+  documents_written: number;
+  documents_read: number;
+  total_document_operations: number;
+  io_errors: number;
+  transaction_conflicts: number;
+}
+```
+
+<ResponseField name="documents_written" type="number">
+  Total number of document write operations
+</ResponseField>
+
+<ResponseField name="documents_read" type="number">
+  Total number of document read operations
+</ResponseField>
+
+<ResponseField name="total_document_operations" type="number">
+  Total number of all document operations
+</ResponseField>
+
+<ResponseField name="io_errors" type="number">
+  Number of I/O errors encountered
+</ResponseField>
+
+<ResponseField name="transaction_conflicts" type="number">
+  Number of transaction conflicts
+</ResponseField>
+
+## Operation types
+
+### BulkOperation
+
+Union type for bulk write operations.
+
+```typescript
+export type BulkOperation<T = Record<string, unknown>> =
+  | BulkInsertOp<T>
+  | BulkUpdateOneOp
+  | BulkUpdateManyOp
+  | BulkDeleteOneOp
+  | BulkDeleteManyOp;
+```
+
+### BulkInsertOp
+
+Bulk insert operation.
+
+```typescript
+export interface BulkInsertOp<T> {
+  op: 'insert';
+  doc: T;
+}
+```
+
+<ParamField path="op" type="'insert'" required>
+  Operation type
+</ParamField>
+
+<ParamField path="doc" type="T" required>
+  Document to insert
+</ParamField>
+
+### BulkUpdateOneOp
+
+Bulk update single document operation.
+
+```typescript
+export interface BulkUpdateOneOp {
+  op: 'update_one';
+  filter: string;
+  update: Record<string, unknown>;
+}
+```
+
+<ParamField path="op" type="'update_one'" required>
+  Operation type
+</ParamField>
+
+<ParamField path="filter" type="string" required>
+  JMESPath filter to match document
+</ParamField>
+
+<ParamField path="update" type="Record<string, unknown>" required>
+  Fields to update
+</ParamField>
+
+### BulkUpdateManyOp
+
+Bulk update multiple documents operation.
+
+```typescript
+export interface BulkUpdateManyOp {
+  op: 'update_many';
+  filter: string;
+  update: Record<string, unknown>;
+}
+```
+
+<ParamField path="op" type="'update_many'" required>
+  Operation type
+</ParamField>
+
+<ParamField path="filter" type="string" required>
+  JMESPath filter to match documents
+</ParamField>
+
+<ParamField path="update" type="Record<string, unknown>" required>
+  Fields to update
+</ParamField>
+
+### BulkDeleteOneOp
+
+Bulk delete single document operation.
+
+```typescript
+export interface BulkDeleteOneOp {
+  op: 'delete_one';
+  filter: string;
+}
+```
+
+<ParamField path="op" type="'delete_one'" required>
+  Operation type
+</ParamField>
+
+<ParamField path="filter" type="string" required>
+  JMESPath filter to match document
+</ParamField>
+
+### BulkDeleteManyOp
+
+Bulk delete multiple documents operation.
+
+```typescript
+export interface BulkDeleteManyOp {
+  op: 'delete_many';
+  filter: string;
+}
+```
+
+<ParamField path="op" type="'delete_many'" required>
+  Operation type
+</ParamField>
+
+<ParamField path="filter" type="string" required>
+  JMESPath filter to match documents
+</ParamField>
+
+**Example**
+
+```typescript
+import { BulkOperation } from '@sohzm/jasonisnthappy';
+
+const operations: BulkOperation<Omit<User, '_id'>>[] = [
+  {
+    op: 'insert',
+    doc: { name: 'Alice', email: 'alice@example.com', age: 30 }
+  },
+  {
+    op: 'update_one',
+    filter: '[?email == `bob@example.com`]',
+    update: { age: 26 }
+  },
+  {
+    op: 'update_many',
+    filter: '[?age < `18`]',
+    update: { status: 'minor' }
+  },
+  {
+    op: 'delete_one',
+    filter: '[?email == `old@example.com`]'
+  },
+  {
+    op: 'delete_many',
+    filter: '[?active == `false`]'
+  }
+];
+
+const result = users.bulkWrite(operations);
+```
+
+## Aggregation types
+
+### AggregationStage
+
+Aggregation pipeline stage.
+
+```typescript
+export interface AggregationStage {
+  match?: string;
+  group_by?: string;
+  count?: string;
+  sum?: { field: string; output: string };
+  avg?: { field: string; output: string };
+  min?: { field: string; output: string };
+  max?: { field: string; output: string };
+  sort?: { field: string; asc?: boolean };
+  limit?: number;
+  skip?: number;
+  project?: string[];
+  exclude?: string[];
+}
+```
+
+<ParamField path="match" type="string">
+  JMESPath filter to match documents
+</ParamField>
+
+<ParamField path="group_by" type="string">
+  Field name to group by
+</ParamField>
+
+<ParamField path="count" type="string">
+  Output field name for count
+</ParamField>
+
+<ParamField path="sum" type="{ field: string; output: string }">
+  Sum aggregation: `field` to sum, `output` field name for result
+</ParamField>
+
+<ParamField path="avg" type="{ field: string; output: string }">
+  Average aggregation: `field` to average, `output` field name for result
+</ParamField>
+
+<ParamField path="min" type="{ field: string; output: string }">
+  Minimum aggregation: `field` to find min, `output` field name for result
+</ParamField>
+
+<ParamField path="max" type="{ field: string; output: string }">
+  Maximum aggregation: `field` to find max, `output` field name for result
+</ParamField>
+
+<ParamField path="sort" type="{ field: string; asc?: boolean }">
+  Sort by field: `field` to sort by, `asc` for ascending (default: true)
+</ParamField>
+
+<ParamField path="limit" type="number">
+  Maximum number of documents to return
+</ParamField>
+
+<ParamField path="skip" type="number">
+  Number of documents to skip
+</ParamField>
+
+<ParamField path="project" type="string[]">
+  Fields to include in output
+</ParamField>
+
+<ParamField path="exclude" type="string[]">
+  Fields to exclude from output
+</ParamField>
+
+**Example**
+
+```typescript
+interface AgeStats {
+  age: number;
+  count: number;
+  avg_score: number;
+}
+
+const stats = users.aggregate<AgeStats>([
+  { match: '[?active == `true`]' },
+  { group_by: 'age' },
+  { count: 'count' },
+  { avg: { field: 'score', output: 'avg_score' } },
+  { sort: { field: 'age', asc: true } },
+  { limit: 10 }
+]);
+```
+
+## Watch types
+
+### ChangeOperation
+
+Type of change operation.
+
+```typescript
+export type ChangeOperation = 'insert' | 'update' | 'delete';
+```
+
+### WatchCallback
+
+Callback function for watching collection changes.
+
+```typescript
+export type WatchCallback<T> = (
+  operation: ChangeOperation,
+  docId: string,
+  document: T | null
+) => void;
+```
+
+<ParamField path="operation" type="ChangeOperation" required>
+  Type of operation: `'insert'`, `'update'`, or `'delete'`
+</ParamField>
+
+<ParamField path="docId" type="string" required>
+  Document ID that changed
+</ParamField>
+
+<ParamField path="document" type="T | null" required>
+  The document data (null for delete operations)
+</ParamField>
+
+**Example**
+
+```typescript
+const callback: WatchCallback<User> = (op, docId, doc) => {
+  switch (op) {
+    case 'insert':
+      console.log(`New user: ${doc.name}`);
+      break;
+    case 'update':
+      console.log(`Updated user: ${doc.name}`);
+      break;
+    case 'delete':
+      console.log(`Deleted user: ${docId}`);
+      break;
+  }
+};
+
+const handle = users.watch(undefined, callback);
+```
+
+## Class types
+
+The following classes are exported and documented in their respective pages:
+
+- [Database](/api/javascript/database) - Main database class
+- [Transaction](/api/javascript/transaction) - Transaction management
+- [Collection](/api/javascript/collection) - Collection operations
+- `WebServer` - Web UI server (stop method only)
+- `WatchHandle` - Change watcher handle (stop method only)
+
+### WebServer
+
+```typescript
+export class WebServer {
+  stop(): void;
+}
+```
+
+Returned by `db.startWebUi()`. Call `stop()` to shut down the web server.
+
+### WatchHandle
+
+```typescript
+export class WatchHandle {
+  stop(): void;
+}
+```
+
+Returned by `collection.watch()`. Call `stop()` to stop watching for changes.

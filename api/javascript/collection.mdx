@@ -1,0 +1,884 @@
+---
+title: Collection
+description: Type-safe collection API for CRUD operations and queries
+---
+
+## Collection
+
+The `Collection` class provides a type-safe, high-level API for working with documents in a specific collection. Collections automatically handle transactions and provide rich querying capabilities.
+
+## Getting a collection
+
+Collections are obtained using `db.getCollection()` with a type parameter:
+
+```typescript
+import { Database, Document } from '@sohzm/jasonisnthappy';
+
+interface User extends Document {
+  _id: string;
+  name: string;
+  email: string;
+  age: number;
+  active: boolean;
+}
+
+const db = Database.open('./my-database.db');
+const users = db.getCollection<User>('users');
+```
+
+## Collection info
+
+### `name()`
+
+Returns the collection name.
+
+```typescript
+name(): string
+```
+
+<ResponseField name="name" type="string">
+  The collection name
+</ResponseField>
+
+**Example**
+
+```typescript
+const users = db.getCollection<User>('users');
+console.log(users.name()); // 'users'
+```
+
+## Basic CRUD operations
+
+### `insert()`
+
+Inserts a document into the collection.
+
+```typescript
+insert(doc: Omit<T, '_id'>): string
+```
+
+<ParamField path="doc" type="Omit<T, '_id'>" required>
+  Document to insert (without `_id` field)
+</ParamField>
+
+<ResponseField name="id" type="string">
+  The auto-generated `_id` of the inserted document
+</ResponseField>
+
+**Example**
+
+```typescript
+const userId = users.insert({
+  name: 'Alice',
+  email: 'alice@example.com',
+  age: 30,
+  active: true
+});
+
+console.log(`User created with ID: ${userId}`);
+```
+
+### `findById()`
+
+Finds a document by its ID.
+
+```typescript
+findById(id: string): T | null
+```
+
+<ParamField path="id" type="string" required>
+  Document ID to find
+</ParamField>
+
+<ResponseField name="document" type="T | null">
+  The document if found, `null` otherwise
+</ResponseField>
+
+**Example**
+
+```typescript
+const user = users.findById('user123');
+
+if (user) {
+  console.log(`Found: ${user.name} (${user.email})`);
+} else {
+  console.log('User not found');
+}
+```
+
+### `updateById()`
+
+Updates a document by its ID.
+
+```typescript
+updateById(id: string, updates: Partial<T>): void
+```
+
+<ParamField path="id" type="string" required>
+  Document ID to update
+</ParamField>
+
+<ParamField path="updates" type="Partial<T>" required>
+  Partial document with fields to update
+</ParamField>
+
+**Example**
+
+```typescript
+users.updateById('user123', {
+  age: 31,
+  email: 'newemail@example.com'
+});
+```
+
+### `deleteById()`
+
+Deletes a document by its ID.
+
+```typescript
+deleteById(id: string): void
+```
+
+<ParamField path="id" type="string" required>
+  Document ID to delete
+</ParamField>
+
+**Example**
+
+```typescript
+users.deleteById('user123');
+console.log('User deleted');
+```
+
+### `findAll()`
+
+Retrieves all documents in the collection.
+
+```typescript
+findAll(): T[]
+```
+
+<ResponseField name="documents" type="T[]">
+  Array of all documents
+</ResponseField>
+
+**Example**
+
+```typescript
+const allUsers = users.findAll();
+console.log(`Total users: ${allUsers.length}`);
+```
+
+### `count()`
+
+Counts all documents in the collection.
+
+```typescript
+count(): number
+```
+
+<ResponseField name="count" type="number">
+  Number of documents
+</ResponseField>
+
+**Example**
+
+```typescript
+const total = users.count();
+console.log(`Total users: ${total}`);
+```
+
+## Query operations
+
+### `find()`
+
+Finds all documents matching a JMESPath filter.
+
+```typescript
+find(filter: string): T[]
+```
+
+<ParamField path="filter" type="string" required>
+  JMESPath query expression
+</ParamField>
+
+<ResponseField name="documents" type="T[]">
+  Array of matching documents
+</ResponseField>
+
+**Example**
+
+```typescript
+// Find active users over 25
+const activeAdults = users.find('[?active == `true` && age > `25`]');
+
+// Find users with specific email domain
+const companyUsers = users.find('[?ends_with(email, `@company.com`)]');
+```
+
+### `findOne()`
+
+Finds the first document matching a filter.
+
+```typescript
+findOne(filter: string): T | null
+```
+
+<ParamField path="filter" type="string" required>
+  JMESPath query expression
+</ParamField>
+
+<ResponseField name="document" type="T | null">
+  The first matching document, or `null` if none found
+</ResponseField>
+
+**Example**
+
+```typescript
+const user = users.findOne('[?email == `alice@example.com`]');
+
+if (user) {
+  console.log(`Found user: ${user.name}`);
+}
+```
+
+### `update()`
+
+Updates all documents matching a filter.
+
+```typescript
+update(filter: string, updates: Partial<T>): number
+```
+
+<ParamField path="filter" type="string" required>
+  JMESPath query expression
+</ParamField>
+
+<ParamField path="updates" type="Partial<T>" required>
+  Fields to update
+</ParamField>
+
+<ResponseField name="count" type="number">
+  Number of documents updated
+</ResponseField>
+
+**Example**
+
+```typescript
+// Deactivate all users over 65
+const updated = users.update('[?age > `65`]', { active: false });
+console.log(`Deactivated ${updated} users`);
+```
+
+### `updateOne()`
+
+Updates the first document matching a filter.
+
+```typescript
+updateOne(filter: string, updates: Partial<T>): boolean
+```
+
+<ParamField path="filter" type="string" required>
+  JMESPath query expression
+</ParamField>
+
+<ParamField path="updates" type="Partial<T>" required>
+  Fields to update
+</ParamField>
+
+<ResponseField name="updated" type="boolean">
+  `true` if a document was updated, `false` otherwise
+</ResponseField>
+
+**Example**
+
+```typescript
+const updated = users.updateOne(
+  '[?email == `alice@example.com`]',
+  { active: false }
+);
+
+if (updated) {
+  console.log('User updated');
+}
+```
+
+### `delete()`
+
+Deletes all documents matching a filter.
+
+```typescript
+delete(filter: string): number
+```
+
+<ParamField path="filter" type="string" required>
+  JMESPath query expression
+</ParamField>
+
+<ResponseField name="count" type="number">
+  Number of documents deleted
+</ResponseField>
+
+**Example**
+
+```typescript
+// Delete inactive users
+const deleted = users.delete('[?active == `false`]');
+console.log(`Deleted ${deleted} inactive users`);
+```
+
+### `deleteOne()`
+
+Deletes the first document matching a filter.
+
+```typescript
+deleteOne(filter: string): boolean
+```
+
+<ParamField path="filter" type="string" required>
+  JMESPath query expression
+</ParamField>
+
+<ResponseField name="deleted" type="boolean">
+  `true` if a document was deleted, `false` otherwise
+</ResponseField>
+
+**Example**
+
+```typescript
+const deleted = users.deleteOne('[?email == `old@example.com`]');
+```
+
+## Upsert operations
+
+### `upsertById()`
+
+Inserts or updates a document by ID.
+
+```typescript
+upsertById(id: string, doc: Omit<T, '_id'>): UpsertResult
+```
+
+<ParamField path="id" type="string" required>
+  Document ID
+</ParamField>
+
+<ParamField path="doc" type="Omit<T, '_id'>" required>
+  Document data (without `_id`)
+</ParamField>
+
+<ResponseField name="result" type="UpsertResult">
+  Result indicating whether document was inserted or updated
+  
+  <Expandable title="UpsertResult properties">
+    <ResponseField name="id" type="string">
+      The document ID
+    </ResponseField>
+    
+    <ResponseField name="inserted" type="boolean">
+      `true` if inserted, `false` if updated
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example**
+
+```typescript
+const result = users.upsertById('user123', {
+  name: 'Alice',
+  email: 'alice@example.com',
+  age: 30,
+  active: true
+});
+
+if (result.inserted) {
+  console.log('New user created');
+} else {
+  console.log('Existing user updated');
+}
+```
+
+### `upsert()`
+
+Inserts or updates the first document matching a filter.
+
+```typescript
+upsert(filter: string, doc: Omit<T, '_id'>): UpsertResult
+```
+
+<ParamField path="filter" type="string" required>
+  JMESPath query expression
+</ParamField>
+
+<ParamField path="doc" type="Omit<T, '_id'>" required>
+  Document data (without `_id`)
+</ParamField>
+
+<ResponseField name="result" type="UpsertResult">
+  Result indicating whether document was inserted or updated
+</ResponseField>
+
+**Example**
+
+```typescript
+const result = users.upsert(
+  '[?email == `bob@example.com`]',
+  {
+    name: 'Bob',
+    email: 'bob@example.com',
+    age: 25,
+    active: true
+  }
+);
+```
+
+## Bulk operations
+
+### `insertMany()`
+
+Inserts multiple documents in a single operation.
+
+```typescript
+insertMany(docs: Omit<T, '_id'>[]): string[]
+```
+
+<ParamField path="docs" type="Omit<T, '_id'>[]" required>
+  Array of documents to insert
+</ParamField>
+
+<ResponseField name="ids" type="string[]">
+  Array of generated document IDs
+</ResponseField>
+
+**Example**
+
+```typescript
+const ids = users.insertMany([
+  { name: 'Alice', email: 'alice@example.com', age: 30, active: true },
+  { name: 'Bob', email: 'bob@example.com', age: 25, active: true },
+  { name: 'Carol', email: 'carol@example.com', age: 35, active: false }
+]);
+
+console.log(`Inserted ${ids.length} users`);
+```
+
+### `bulkWrite()`
+
+Executes multiple mixed operations (insert, update, delete) in one call.
+
+```typescript
+bulkWrite(
+  operations: BulkOperation<Omit<T, '_id'>>[],
+  ordered?: boolean
+): BulkWriteResult
+```
+
+<ParamField path="operations" type="BulkOperation<Omit<T, '_id'>>[]" required>
+  Array of bulk operations to execute
+</ParamField>
+
+<ParamField path="ordered" type="boolean">
+  If `true`, stops on first error. If `false`, continues on errors. Default: `true`
+</ParamField>
+
+<ResponseField name="result" type="BulkWriteResult">
+  Statistics about the bulk operation
+  
+  <Expandable title="BulkWriteResult properties">
+    <ResponseField name="inserted_count" type="number">
+      Number of documents inserted
+    </ResponseField>
+    
+    <ResponseField name="updated_count" type="number">
+      Number of documents updated
+    </ResponseField>
+    
+    <ResponseField name="deleted_count" type="number">
+      Number of documents deleted
+    </ResponseField>
+    
+    <ResponseField name="inserted_ids" type="string[]">
+      Array of IDs for inserted documents
+    </ResponseField>
+    
+    <ResponseField name="errors" type="BulkWriteError[]">
+      Array of errors encountered during bulk operation
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example**
+
+```typescript
+import { BulkOperation } from '@sohzm/jasonisnthappy';
+
+const operations: BulkOperation<Omit<User, '_id'>>[] = [
+  {
+    op: 'insert',
+    doc: { name: 'Alice', email: 'alice@example.com', age: 30, active: true }
+  },
+  {
+    op: 'update_one',
+    filter: '[?email == `bob@example.com`]',
+    update: { age: 26 }
+  },
+  {
+    op: 'delete_many',
+    filter: '[?active == `false`]'
+  }
+];
+
+const result = users.bulkWrite(operations);
+
+console.log(`Inserted: ${result.inserted_count}`);
+console.log(`Updated: ${result.updated_count}`);
+console.log(`Deleted: ${result.deleted_count}`);
+
+if (result.errors.length > 0) {
+  console.log('Errors:', result.errors);
+}
+```
+
+## Advanced queries
+
+### `queryWithOptions()`
+
+Performs a query with sorting, pagination, and field projection.
+
+```typescript
+queryWithOptions(
+  filter?: string,
+  sortField?: keyof T & string,
+  sortAsc?: boolean,
+  limit?: number,
+  skip?: number,
+  projectFields?: (keyof T & string)[],
+  excludeFields?: (keyof T & string)[]
+): T[]
+```
+
+<ParamField path="filter" type="string">
+  JMESPath query expression (optional)
+</ParamField>
+
+<ParamField path="sortField" type="keyof T & string">
+  Field to sort by
+</ParamField>
+
+<ParamField path="sortAsc" type="boolean">
+  Sort ascending if `true`, descending if `false`
+</ParamField>
+
+<ParamField path="limit" type="number">
+  Maximum number of documents to return
+</ParamField>
+
+<ParamField path="skip" type="number">
+  Number of documents to skip
+</ParamField>
+
+<ParamField path="projectFields" type="(keyof T & string)[]">
+  Fields to include in results
+</ParamField>
+
+<ParamField path="excludeFields" type="(keyof T & string)[]">
+  Fields to exclude from results
+</ParamField>
+
+<ResponseField name="documents" type="T[]">
+  Array of matching documents
+</ResponseField>
+
+**Example**
+
+```typescript
+// Get top 10 active users sorted by age (descending), skip first 20
+const topUsers = users.queryWithOptions(
+  '[?active == `true`]',
+  'age',
+  false,
+  10,
+  20
+);
+
+// Get users with only name and email fields
+const basicInfo = users.queryWithOptions(
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  undefined,
+  ['name', 'email']
+);
+```
+
+### `queryCount()`
+
+Counts documents matching a query with pagination.
+
+```typescript
+queryCount(filter?: string, skip?: number, limit?: number): number
+```
+
+<ParamField path="filter" type="string">
+  JMESPath query expression (optional)
+</ParamField>
+
+<ParamField path="skip" type="number">
+  Number of documents to skip
+</ParamField>
+
+<ParamField path="limit" type="number">
+  Maximum number of documents to count
+</ParamField>
+
+<ResponseField name="count" type="number">
+  Number of matching documents
+</ResponseField>
+
+### `queryFirst()`
+
+Returns the first document matching a query with optional sorting.
+
+```typescript
+queryFirst(
+  filter?: string,
+  sortField?: keyof T & string,
+  sortAsc?: boolean
+): T | null
+```
+
+<ParamField path="filter" type="string">
+  JMESPath query expression (optional)
+</ParamField>
+
+<ParamField path="sortField" type="keyof T & string">
+  Field to sort by
+</ParamField>
+
+<ParamField path="sortAsc" type="boolean">
+  Sort ascending if `true`, descending if `false`
+</ParamField>
+
+<ResponseField name="document" type="T | null">
+  The first matching document, or `null` if none found
+</ResponseField>
+
+**Example**
+
+```typescript
+// Get oldest active user
+const oldest = users.queryFirst(
+  '[?active == `true`]',
+  'age',
+  false
+);
+```
+
+### `distinct()`
+
+Returns unique values for a field.
+
+```typescript
+distinct<K extends keyof T>(field: K): T[K][]
+```
+
+<ParamField path="field" type="K" required>
+  Field name to get distinct values for
+</ParamField>
+
+<ResponseField name="values" type="T[K][]">
+  Array of unique values
+</ResponseField>
+
+**Example**
+
+```typescript
+// Get all unique ages
+const ages = users.distinct('age');
+console.log('Unique ages:', ages);
+
+// Get all unique email domains (assuming processing)
+const emails = users.distinct('email');
+```
+
+### `countDistinct()`
+
+Counts unique values for a field.
+
+```typescript
+countDistinct(field: keyof T): number
+```
+
+<ParamField path="field" type="keyof T" required>
+  Field name
+</ParamField>
+
+<ResponseField name="count" type="number">
+  Number of distinct values
+</ResponseField>
+
+**Example**
+
+```typescript
+const uniqueAges = users.countDistinct('age');
+console.log(`${uniqueAges} different ages`);
+```
+
+### `countWithQuery()`
+
+Counts documents matching a filter.
+
+```typescript
+countWithQuery(filter?: string): number
+```
+
+<ParamField path="filter" type="string">
+  JMESPath query expression (optional)
+</ParamField>
+
+<ResponseField name="count" type="number">
+  Number of matching documents
+</ResponseField>
+
+**Example**
+
+```typescript
+const activeCount = users.countWithQuery('[?active == `true`]');
+console.log(`Active users: ${activeCount}`);
+```
+
+## Full-text search
+
+### `search()`
+
+Performs full-text search on indexed fields.
+
+```typescript
+search(query: string): SearchResult[]
+```
+
+<ParamField path="query" type="string" required>
+  Search query string
+</ParamField>
+
+<ResponseField name="results" type="SearchResult[]">
+  Array of search results with scores
+  
+  <Expandable title="SearchResult properties">
+    <ResponseField name="doc_id" type="string">
+      Document ID of the matching document
+    </ResponseField>
+    
+    <ResponseField name="score" type="number">
+      Relevance score (higher is more relevant)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example**
+
+```typescript
+// First, create a text index
+db.createTextIndex('users', 'name_text_idx', 'name');
+
+// Then search
+const results = users.search('alice');
+
+for (const result of results) {
+  const user = users.findById(result.doc_id);
+  console.log(`${user.name} (score: ${result.score})`);
+}
+```
+
+## Aggregation
+
+### `aggregate()`
+
+Runs an aggregation pipeline on the collection.
+
+```typescript
+aggregate<R>(pipeline: AggregationStage[]): R[]
+```
+
+<ParamField path="pipeline" type="AggregationStage[]" required>
+  Array of aggregation stages
+</ParamField>
+
+<ResponseField name="results" type="R[]">
+  Array of aggregation results (shape depends on pipeline)
+</ResponseField>
+
+**Example**
+
+```typescript
+// Count users by age group
+const ageGroups = users.aggregate<{ age: number; count: number }>([
+  { match: '[?active == `true`]' },
+  { group_by: 'age' },
+  { count: 'count' },
+  { sort: { field: 'age', asc: true } }
+]);
+
+console.log(ageGroups);
+// [{ age: 25, count: 5 }, { age: 30, count: 3 }, ...]
+
+// Calculate average age by activity status
+const avgAges = users.aggregate<{ active: boolean; avg_age: number }>([
+  { group_by: 'active' },
+  { avg: { field: 'age', output: 'avg_age' } }
+]);
+```
+
+See the [Types reference](/api/javascript/types#aggregationstage) for all available aggregation stages.
+
+## Change tracking
+
+### `watch()`
+
+Watches for changes to documents in the collection.
+
+```typescript
+watch(filter: string | undefined, callback: WatchCallback<T>): WatchHandle
+```
+
+<ParamField path="filter" type="string | undefined" required>
+  JMESPath filter to watch specific documents, or `undefined` to watch all
+</ParamField>
+
+<ParamField path="callback" type="WatchCallback<T>" required>
+  Function called when changes occur
+  
+  Callback signature:
+  ```typescript
+  (operation: 'insert' | 'update' | 'delete', docId: string, document: T | null) => void
+  ```
+</ParamField>
+
+<ResponseField name="handle" type="WatchHandle">
+  Handle to stop watching
+</ResponseField>
+
+**Example**
+
+```typescript
+// Watch all user changes
+const handle = users.watch(undefined, (op, docId, doc) => {
+  console.log(`${op}: ${docId}`);
+  if (doc) {
+    console.log('New data:', doc);
+  }
+});
+
+// Watch only active users
+const activeHandle = users.watch(
+  '[?active == `true`]',
+  (op, docId, doc) => {
+    console.log(`Active user ${op}: ${docId}`);
+  }
+);
+
+// Stop watching later
+handle.stop();
+activeHandle.stop();
+```

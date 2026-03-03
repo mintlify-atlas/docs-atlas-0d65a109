@@ -1,0 +1,327 @@
+---
+title: Database commands
+description: Database-level operations for jasonisnthappy CLI
+---
+
+Database commands operate on the entire database file and provide maintenance, monitoring, and administrative functions.
+
+## db info
+
+Display comprehensive database information including size, collections, and configuration.
+
+```bash
+jasonisnthappy <DATABASE> db info
+```
+
+### Example
+
+```bash
+jasonisnthappy mydb.db db info
+```
+
+### Output
+
+```
+Database Information:
+  Path: mydb.db
+  Size: 4.2 MB
+  Collections: 5
+  Page Size: 4096 bytes
+  Total Pages: 1024
+  MVCC Enabled: true
+  WAL Mode: enabled
+```
+
+<Note>
+If you specify a database path without any command, `db info` is executed by default.
+</Note>
+
+## db backup
+
+Create a point-in-time backup of the database. The backup is a complete copy that can be opened independently.
+
+```bash
+jasonisnthappy <DATABASE> db backup <DESTINATION>
+```
+
+### Arguments
+
+- `destination` - Path where the backup file will be created
+
+### Example
+
+<CodeGroup>
+```bash Basic backup
+jasonisnthappy mydb.db db backup mydb.backup.db
+```
+
+```bash Timestamped backup
+jasonisnthappy mydb.db db backup "backups/mydb-$(date +%Y%m%d).db"
+```
+</CodeGroup>
+
+### Output
+
+```
+✓ Database backed up successfully
+  Source: mydb.db
+  Destination: mydb.backup.db
+  Size: 4.2 MB
+  Duration: 124ms
+```
+
+<Tip>
+Backups are performed with file locking to ensure consistency. Reads and writes can continue during backup.
+</Tip>
+
+## db compact
+
+Reclaim disk space by removing old MVCC versions and reorganizing the B-tree structure.
+
+```bash
+jasonisnthappy <DATABASE> db compact
+```
+
+### Example
+
+```bash
+jasonisnthappy mydb.db db compact
+```
+
+### Output
+
+```
+✓ Database compacted successfully
+  Before: 8.4 MB
+  After: 4.2 MB
+  Reclaimed: 4.2 MB (50%)
+  Duration: 342ms
+```
+
+<Note>
+Compaction can take longer on large databases. The database remains available for reads during compaction.
+</Note>
+
+## db collections
+
+List all collections in the database. This is an alias for `collection list`.
+
+```bash
+jasonisnthappy <DATABASE> db collections
+```
+
+### Example
+
+```bash
+jasonisnthappy mydb.db db collections
+```
+
+### Output
+
+<Tabs>
+  <Tab title="pretty">
+    ```
+    Collections (5):
+      • users (1,234 documents)
+      • orders (5,678 documents)
+      • products (432 documents)
+      • logs (12,345 documents)
+      • sessions (89 documents)
+    ```
+  </Tab>
+  
+  <Tab title="table">
+    ```
+    ┌───────────┬───────────┐
+    │ Name      │ Documents │
+    ├───────────┼───────────┤
+    │ users     │ 1,234     │
+    │ orders    │ 5,678     │
+    │ products  │ 432       │
+    │ logs      │ 12,345    │
+    │ sessions  │ 89        │
+    └───────────┴───────────┘
+    ```
+  </Tab>
+  
+  <Tab title="json">
+    ```json
+    [
+      {"name":"users","document_count":1234},
+      {"name":"orders","document_count":5678},
+      {"name":"products","document_count":432},
+      {"name":"logs","document_count":12345},
+      {"name":"sessions","document_count":89}
+    ]
+    ```
+  </Tab>
+</Tabs>
+
+## metrics
+
+Display real-time database metrics including transactions, cache performance, and WAL statistics.
+
+```bash
+jasonisnthappy <DATABASE> metrics
+```
+
+### Example
+
+```bash
+jasonisnthappy mydb.db metrics
+```
+
+### Output
+
+```
+Database Metrics:
+
+Transactions:
+  Total: 1,234
+  Active: 2
+  Committed: 1,230
+  Aborted: 4
+  
+Cache:
+  Size: 64 MB
+  Hit Rate: 94.2%
+  Evictions: 1,245
+  
+WAL:
+  Size: 2.1 MB
+  Checkpoints: 45
+  Last Checkpoint: 2s ago
+  
+Errors:
+  Total: 3
+  Last Error: 1h ago
+```
+
+<Tip>
+Use `--format json` to export metrics for monitoring systems like Prometheus or Datadog.
+</Tip>
+
+## watch
+
+Watch for real-time changes in a collection. Displays inserts, updates, and deletes as they happen.
+
+```bash
+jasonisnthappy <DATABASE> watch <COLLECTION>
+```
+
+### Arguments
+
+- `collection` - Name of the collection to monitor
+
+### Example
+
+```bash
+jasonisnthappy mydb.db watch users
+```
+
+### Output
+
+```
+Watching collection 'users' for changes... (Press Ctrl+C to stop)
+
+[INSERT] ID: 1234
+{
+  "name": "Alice",
+  "email": "alice@example.com"
+}
+
+[UPDATE] ID: 567
+{
+  "name": "Bob Smith",
+  "age": 31
+}
+
+[DELETE] ID: 890
+```
+
+<Note>
+The watch command uses change streams and will run indefinitely until interrupted with Ctrl+C.
+</Note>
+
+## export
+
+Export an entire collection to a JSON file. Each document is exported with its ID.
+
+```bash
+jasonisnthappy <DATABASE> export <COLLECTION> <OUTPUT>
+```
+
+### Arguments
+
+- `collection` - Name of the collection to export
+- `output` - Path to the output JSON file
+
+### Example
+
+```bash
+jasonisnthappy mydb.db export users users.json
+```
+
+### Output
+
+```
+✓ Exported collection 'users'
+  Documents: 1,234
+  File: users.json
+  Size: 245 KB
+  Duration: 89ms
+```
+
+### Exported file format
+
+```json
+[
+  {"_id":1,"name":"Alice","age":30},
+  {"_id":2,"name":"Bob","age":25},
+  {"_id":3,"name":"Charlie","age":35}
+]
+```
+
+## import
+
+Import documents from a JSON file into a collection. Creates the collection if it doesn't exist.
+
+```bash
+jasonisnthappy <DATABASE> import <COLLECTION> <INPUT>
+```
+
+### Arguments
+
+- `collection` - Name of the destination collection
+- `input` - Path to the input JSON file
+
+### Example
+
+```bash
+jasonisnthappy mydb.db import users users.json
+```
+
+### Output
+
+```
+✓ Imported to collection 'users'
+  Documents: 1,234
+  File: users.json
+  Duration: 156ms
+```
+
+<Tip>
+Imports use bulk operations for optimal performance. The `_id` field is preserved if present, otherwise new IDs are generated.
+</Tip>
+
+## Related commands
+
+<CardGroup cols={2}>
+  <Card title="Collection commands" icon="folder" href="/cli/collection-commands">
+    Manage individual collections
+  </Card>
+  
+  <Card title="Interactive REPL" icon="terminal" href="/cli/repl">
+    Explore databases interactively
+  </Card>
+</CardGroup>

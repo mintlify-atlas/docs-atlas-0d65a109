@@ -1,0 +1,402 @@
+---
+title: Go examples
+description: Practical examples for jasonisnthappy Go bindings
+---
+
+## Basic CRUD operations
+
+Complete example showing create, read, update, and delete operations.
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    db "github.com/sohzm/jasonisnthappy/bindings/go"
+)
+
+func main() {
+    // Open database
+    database, err := db.Open("./my_database.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer database.Close()
+
+    // Begin transaction
+    tx, err := database.BeginTransaction()
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer tx.Rollback() // Auto-rollback if not committed
+
+    // Insert document
+    doc := map[string]interface{}{
+        "name": "Alice",
+        "age":  30,
+        "email": "alice@example.com",
+    }
+    id, err := tx.Insert("users", doc)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Inserted document with ID: %s\n", id)
+
+    // Find by ID
+    var result map[string]interface{}
+    found, err := tx.FindByID("users", id, &result)
+    if err != nil {
+        log.Fatal(err)
+    }
+    if found {
+        fmt.Printf("Found: %+v\n", result)
+    }
+
+    // Update
+    doc["age"] = 31
+    err = tx.UpdateByID("users", id, doc)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Find all
+    var all []map[string]interface{}
+    err = tx.FindAll("users", &all)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("All users: %+v\n", all)
+
+    // Commit transaction
+    err = tx.Commit()
+    if err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+## Using collection API
+
+Example using non-transactional collection operations.
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    db "github.com/sohzm/jasonisnthappy/bindings/go"
+)
+
+func main() {
+    database, err := db.Open("./my_database.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer database.Close()
+
+    // Get collection
+    coll, err := database.GetCollection("users")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer coll.Free()
+
+    // Insert a document
+    doc := map[string]interface{}{
+        "name": "Bob",
+        "age":  25,
+    }
+    id, err := coll.Insert(doc)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Inserted with ID: %s\n", id)
+
+    // Query documents
+    var results []map[string]interface{}
+    err = coll.Find("age > 20", &results)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Found %d users over 20\n", len(results))
+
+    // Update with filter
+    updateDoc := map[string]interface{}{"verified": true}
+    count, err := coll.Update("age > 20", updateDoc)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Updated %d documents\n", count)
+}
+```
+
+## Watch for changes
+
+Example monitoring collection changes in real-time.
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+    "time"
+
+    jasonisnthappy "github.com/sohzm/jasonisnthappy/bindings/go"
+)
+
+func main() {
+    db, err := jasonisnthappy.Open("./my_database.db")
+    if err != nil {
+        log.Fatalf("Failed to open database: %v", err)
+    }
+    defer db.Close()
+
+    coll, err := db.GetCollection("events")
+    if err != nil {
+        log.Fatalf("Failed to get collection: %v", err)
+    }
+    defer coll.Free()
+
+    // Start watching for changes
+    fmt.Println("Starting watch on 'events' collection...")
+    handle, err := coll.WatchStart("", func(collection, operation, docID, docJSON string) {
+        fmt.Printf("[WATCH EVENT] Collection: %s, Operation: %s, DocID: %s\n", 
+            collection, operation, docID)
+        fmt.Printf("              Document: %s\n", docJSON)
+    })
+    if err != nil {
+        log.Fatalf("Failed to start watch: %v", err)
+    }
+    defer handle.Stop()
+
+    // Insert some documents
+    doc1 := map[string]interface{}{
+        "_id":   "event1",
+        "type":  "login",
+        "user":  "alice",
+        "timestamp": time.Now().Unix(),
+    }
+    if _, err := coll.Insert(doc1); err != nil {
+        log.Printf("Insert error: %v", err)
+    }
+    time.Sleep(100 * time.Millisecond)
+
+    // Update a document
+    updateDoc := map[string]interface{}{
+        "_id":   "event1",
+        "type":  "login",
+        "user":  "alice_updated",
+        "timestamp": time.Now().Unix(),
+    }
+    if err := coll.UpdateByID("event1", updateDoc); err != nil {
+        log.Printf("Update error: %v", err)
+    }
+    time.Sleep(100 * time.Millisecond)
+
+    // Delete a document
+    if err := coll.DeleteByID("event1"); err != nil {
+        log.Printf("Delete error: %v", err)
+    }
+    time.Sleep(100 * time.Millisecond)
+
+    fmt.Println("Watch example completed!")
+}
+```
+
+## Indexing and schema validation
+
+Example creating indexes and setting up schema validation.
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    db "github.com/sohzm/jasonisnthappy/bindings/go"
+)
+
+func main() {
+    database, err := db.Open("./my_database.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer database.Close()
+
+    // Create a single-field index
+    err = database.CreateIndex("users", "email_idx", "email", true)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println("Created unique index on email")
+
+    // Create a compound index
+    err = database.CreateCompoundIndex("users", "name_age_idx", 
+        []string{"name", "age"}, false)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println("Created compound index on name and age")
+
+    // Create a text search index
+    err = database.CreateTextIndex("articles", "content_text_idx", "content")
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println("Created full-text search index")
+
+    // List all indexes
+    indexes, err := database.ListIndexes("users")
+    if err != nil {
+        log.Fatal(err)
+    }
+    for _, idx := range indexes {
+        fmt.Printf("Index: %s, Fields: %v, Unique: %v\n", 
+            idx.Name, idx.Fields, idx.Unique)
+    }
+
+    // Set JSON schema
+    schema := map[string]interface{}{
+        "type": "object",
+        "properties": map[string]interface{}{
+            "name": map[string]interface{}{"type": "string"},
+            "age":  map[string]interface{}{"type": "number"},
+            "email": map[string]interface{}{
+                "type": "string",
+                "format": "email",
+            },
+        },
+        "required": []string{"name", "email"},
+    }
+    err = database.SetSchema("users", schema)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println("Set JSON schema for users collection")
+}
+```
+
+## Transaction with retries
+
+Example using automatic transaction retries on conflict.
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    db "github.com/sohzm/jasonisnthappy/bindings/go"
+)
+
+func main() {
+    database, err := db.Open("./my_database.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer database.Close()
+
+    // Configure transaction retries
+    config := db.TransactionConfig{
+        MaxRetries:         5,
+        RetryBackoffBaseMs: 10,
+        MaxRetryBackoffMs:  1000,
+    }
+    err = database.SetTransactionConfig(config)
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    // Run transaction with automatic retries
+    err = database.RunTransaction(func(tx *db.Transaction) error {
+        doc := map[string]interface{}{
+            "name": "Charlie",
+            "age":  28,
+        }
+        id, err := tx.Insert("users", doc)
+        if err != nil {
+            return err
+        }
+        fmt.Printf("Inserted user: %s\n", id)
+        return nil
+    })
+
+    if err != nil {
+        log.Fatalf("Transaction failed: %v", err)
+    }
+    fmt.Println("Transaction completed successfully")
+}
+```
+
+## Backup and maintenance
+
+Example performing database maintenance operations.
+
+```go
+package main
+
+import (
+    "fmt"
+    "log"
+
+    db "github.com/sohzm/jasonisnthappy/bindings/go"
+)
+
+func main() {
+    database, err := db.Open("./my_database.db")
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer database.Close()
+
+    // Create backup
+    backupPath := "./backup.db"
+    err = database.Backup(backupPath)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Created backup at %s\n", backupPath)
+
+    // Verify backup
+    info, err := db.VerifyBackup(backupPath)
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Backup info: %+v\n", info)
+
+    // Perform checkpoint
+    err = database.Checkpoint()
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Println("Checkpoint completed")
+
+    // Get metrics
+    metrics, err := database.Metrics()
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Database metrics: %+v\n", metrics)
+
+    // Run garbage collection
+    stats, err := database.GarbageCollect()
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("GC stats: %+v\n", stats)
+
+    // Get database info
+    dbInfo, err := database.DatabaseInfo()
+    if err != nil {
+        log.Fatal(err)
+    }
+    fmt.Printf("Database info: %+v\n", dbInfo)
+}
+```

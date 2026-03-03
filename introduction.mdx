@@ -1,0 +1,177 @@
+---
+title: Introduction to jasonisnthappy
+description: A lightweight, embedded document database with ACID transactions and MVCC support
+---
+
+<img src="https://jasonisnthappy.soham.sh/uwu/main.png" alt="jasonisnthappy" />
+
+## What is jasonisnthappy?
+
+jasonisnthappy is a lightweight, embedded document database written in Rust with ACID transactions and MVCC (Multi-Version Concurrency Control) support. It provides a simple, file-based solution for applications that need reliable JSON document storage without the overhead of a separate database server.
+
+Designed for developers who want the power of a document database with the simplicity of SQLite, jasonisnthappy runs entirely within your application process and stores data in a single file.
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Pure Rust" icon="rust">
+    No `unsafe` code in the core library, ensuring memory safety and reliability
+  </Card>
+  <Card title="ACID transactions" icon="shield-check">
+    Full commit/rollback with conflict detection and write-ahead logging
+  </Card>
+  <Card title="MVCC support" icon="code-branch">
+    Snapshot isolation where reads never block writes and writes never block reads
+  </Card>
+  <Card title="Cross-platform" icon="globe">
+    Works seamlessly on macOS, Linux, and Windows
+  </Card>
+</CardGroup>
+
+## Core capabilities
+
+### Document storage
+- JSON documents with automatic ID generation
+- Upsert operations for flexible data management
+- Schema validation using JSON Schema
+- Configurable document size limits
+
+### Advanced indexing
+- B-tree storage engine with copy-on-write
+- Single-field and compound indexes
+- Unique indexes for data integrity
+- Full-text search with TF-IDF scoring and Unicode tokenization
+
+### Query and aggregation
+- Rich query language with logical, comparison, and membership operators
+- Dot notation for nested field access
+- Aggregation pipeline with group, match, sort, project, and accumulator stages
+- QueryBuilder with fluent API for sorting, pagination, and projections
+
+### Production-ready features
+- **Write-Ahead Logging (WAL)**: Checksummed for crash recovery and durability
+- **Change streams**: Real-time notifications on insert, update, and delete operations
+- **Bulk operations**: High-throughput batch inserts and writes
+- **Backup & restore**: Point-in-time snapshots with file locking
+- **Garbage collection**: Reclaim space from old MVCC versions
+- **Read-only mode**: Safe concurrent access for read replicas
+- **LRU page cache**: In-memory caching with corruption detection
+- **Metrics**: Track transactions, cache, WAL, and errors
+
+### Developer experience
+- **Web UI & REST API**: Built-in dashboard and CRUD endpoints for easy exploration
+- **CLI**: Interactive REPL and command-line access
+- **Language bindings**: Use from Rust, Go, Python, or JavaScript (Node/Deno/Bun)
+- **Configurable**: Tunable cache, checkpoints, permissions, and limits
+
+## Use cases
+
+jasonisnthappy is ideal for:
+
+<CardGroup cols={2}>
+  <Card title="Desktop applications">
+    Embedded storage for Electron, Tauri, or native desktop apps
+  </Card>
+  <Card title="Command-line tools">
+    Local data persistence without external dependencies
+  </Card>
+  <Card title="Edge computing">
+    Lightweight database for IoT devices and edge servers
+  </Card>
+  <Card title="Mobile backends">
+    Embedded database for mobile applications
+  </Card>
+  <Card title="Development and testing">
+    Quick prototyping with a simple, file-based database
+  </Card>
+  <Card title="Microservices">
+    Service-local data storage with ACID guarantees
+  </Card>
+</CardGroup>
+
+## Performance characteristics
+
+All benchmarks run with ACID guarantees and MVCC enabled:
+
+- **Bulk inserts**: ~19,150 documents/sec (1000 docs/transaction)
+- **Single insert**: ~8ms with full fsync durability (WAL + DB file)
+- **Query speed**: Sub-millisecond queries even on 2500+ document collections
+- **Concurrent writes**: Linear scaling with thread count up to core count
+- **MVCC overhead**: Minimal - reads don't block writes, writes don't block reads
+
+<Info>
+  See the full [performance benchmarks](https://github.com/sohzm/jasonisnthappy#performance-benchmarks) in the repository for detailed metrics across write, read, bulk insert, query, and update operations.
+</Info>
+
+## Multi-language support
+
+jasonisnthappy provides first-class support for multiple programming languages through a shared C FFI layer:
+
+<CodeGroup>
+```rust Rust
+use jasonisnthappy::Database;
+use serde_json::json;
+
+let db = Database::open("mydb.db")?;
+let users = db.collection("users");
+let id = users.insert(json!({"name": "Alice"}))?
+db.close()?;
+```
+
+```go Go
+import db "github.com/sohzm/jasonisnthappy/bindings/go"
+
+database, _ := db.Open("./my_database.db")
+defer database.Close()
+
+tx, _ := database.BeginTransaction()
+id, _ := tx.Insert("users", map[string]interface{}{
+    "name": "Alice",
+})
+tx.Commit()
+```
+
+```python Python
+from jasonisnthappy import Database
+
+with Database.open("./my_database.db") as db:
+    with db.begin_transaction() as tx:
+        users = tx.collection("users")
+        doc_id = users.insert({"name": "Alice"})
+```
+
+```javascript JavaScript
+const { Database } = require('@sohzm/jasonisnthappy');
+
+const db = Database.open('./my_database.db');
+const tx = db.beginTransaction();
+const id = tx.insert('users', { name: 'Alice' });
+tx.commit();
+db.close();
+```
+</CodeGroup>
+
+## Get started
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running with jasonisnthappy in 5 minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Install jasonisnthappy for your language and platform
+  </Card>
+  <Card title="Core concepts" icon="book" href="/concepts/architecture">
+    Learn about transactions, collections, and MVCC
+  </Card>
+  <Card title="API reference" icon="code" href="/api/rust/database">
+    Explore the complete API documentation
+  </Card>
+</CardGroup>
+
+## Open source
+
+jasonisnthappy is open source and licensed under MIT. Contributions, issues, and feature requests are welcome!
+
+<Card title="View on GitHub" icon="github" href="https://github.com/sohzm/jasonisnthappy">
+  Star the repository and contribute to the project
+</Card>

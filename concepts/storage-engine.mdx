@@ -1,0 +1,581 @@
+---
+title: Storage engine
+description: Copy-on-write B-trees, page management, and write-ahead logging
+---
+
+The storage engine is the foundation of jasonisnthappy's performance and reliability. It combines **copy-on-write B-trees** for document indexing, an **LRU-cached pager** for page I/O, and a **write-ahead log** for crash recovery.
+
+## B-tree structure
+
+jasonisnthappy uses B-trees to index documents by ID and maintain sort order for efficient queries.
+
+### Node types
+
+B-trees have two node types (src/core/btree.rs:10):
+
+```rust
+pub enum NodeType {
+    InternalNode = 0,  // Routing nodes with keys and child pointers
+    LeafNode = 1,      // Data nodes with document ID → page number
+}
+```
+
+**Leaf node** (src/core/btree.rs:27):
+```rust
+pub struct LeafEntry {
+    pub key: String,      // Document ID
+    pub value: u64,       // Page number where document is stored
+}
+
+pub struct BTreeNode {
+    pub entries: Vec<LeafEntry>,  // Sorted by key
+    pub next_leaf: u64,           // Pointer to next leaf (for iteration)
+}
+```
+
+**Internal node** (src/core/btree.rs:33):
+```rust
+pub struct BTreeNode {
+    pub keys: Vec<String>,       // Separator keys
+    pub children: Vec<u64>,      // Child page numbers
+}
+```
+
+<Note>
+B-tree order is defined as `BTREE_ORDER = 128` (src/core/constants.rs). This means nodes can have up to 128 entries before splitting, balancing depth vs fanout.
+</Note>
+
+### Tree operations
+
+**Search** (src/core/btree.rs:138):
+
+```rust
+pub fn search(&self, doc_id: &str) -> Result<u64> {
+    let root = self.get_root_page();
+    let mut node = self.read_node(root)?;
+    
+    // Walk down the tree
+    while node.node_type == NodeType::InternalNode {
+        let child_page = self.find_child(&node, doc_id)?;
+        node = self.read_node(child_page)?;
+    }
+    
+    // Binary search in leaf
+    for entry in &node.entries {
+        if entry.key == doc_id {
+            return Ok(entry.value);  // Found!
+        }
+    }
+    
+    Err(Error::NotFound)
+}
+```
+
+Complexity: **O(log n)** lookups.
+
+**Insert** (src/core/btree.rs:156):
+
+1. Find the leaf node where key should go
+2. Insert entry in sorted order
+3. If leaf overflows (> BTREE_ORDER entries), **split** it
+4. Promote middle key to parent
+5. Recursively split parents if needed
+6. If root splits, create new root (tree grows taller)
+
+**Delete** (src/core/btree.rs:179):
+
+1. Find the leaf node containing key
+2. Remove entry from leaf
+3. Update node on disk
+
+<Info>
+jasonisnthappy does **not rebalance** after delete. This simplifies the implementation and is acceptable for document workloads where deletes are less frequent than inserts.
+</Info>
+
+### Iteration
+
+Leaf nodes are linked via `next_leaf` pointers, enabling **O(n) sequential scans**:
+
+```rust
+pub fn iterator(&self) -> Result<BTreeIterator> {
+    // Find leftmost leaf
+    let mut node = self.read_node(root)?;
+    while node.node_type == NodeType::InternalNode {
+        node = self.read_node(node.children[0])?;
+    }
+    
+    Ok(BTreeIterator { current_leaf: Some(node), index: 0 })
+}
+```
+
+**Usage:**
+```rust
+let mut iter = btree.iterator()?;
+while iter.next() {
+    let (doc_id, page_num) = iter.entry();
+    println!("{} → page {}", doc_id, page_num);
+}
+```
+
+This powers collection scans like `find()` and `count()`.
+
+## Copy-on-write (CoW)
+
+To support MVCC snapshot isolation, B-trees use **copy-on-write**: modified pages are copied to new locations instead of being overwritten in place.
+
+### CoW state tracking
+
+Each B-tree tracks CoW state (src/core/btree.rs:75):
+
+```rust
+struct BTreeInner {
+    root_page: u64,                  // Current root
+    tx_active: bool,                 // In transaction?
+    cow_pages: HashMap<u64, u64>,    // old page → new page
+    new_pages: HashMap<u64, bool>,   // newly allocated pages
+    modified_root: u64,              // New root (if changed)
+}
+```
+
+### Write flow
+
+When a transaction modifies a node (src/core/btree.rs:535):
+
+```rust
+fn write_node(&self, node: &BTreeNode) -> Result<()> {
+    let mut page_num = node.page_num;
+    
+    if tx_active {
+        let is_new = new_pages.contains_key(&page_num);
+        
+        if !is_new {  // Existing page needs CoW
+            if let Some(&existing_cow) = cow_pages.get(&page_num) {
+                page_num = existing_cow;  // Already copied
+            } else {
+                let new_page = self.pager.alloc_page()?;
+                cow_pages.insert(page_num, new_page);  // Track mapping
+                new_pages.insert(new_page, true);
+                page_num = new_page;  // Write to new page
+                
+                // If this is the root, update root pointer
+                if page_num == root_page {
+                    modified_root = new_page;
+                }
+            }
+        }
+    }
+    
+    // Serialize and write to (possibly new) page
+    let data = serialize_node(node, page_num);
+    self.pager.write_page_transfer(page_num, data)?;
+    
+    Ok(())
+}
+```
+
+**Visualization:**
+
+```
+Original tree:                    After CoW insert:
+    
+    Root (page 10)                   Root (page 50)  ← new root
+    /          \                     /          \
+ Leaf 20     Leaf 30             Leaf 51    Leaf 30  ← leaf 20 copied to 51
+                                    ↑
+                                 inserted here
+```
+
+Old pages (10, 20) remain untouched for concurrent readers. New version uses pages (50, 51).
+
+### Transaction lifecycle
+
+**Begin:**
+```rust
+btree.begin_transaction();
+// Clears cow_pages, new_pages, modified_root
+```
+
+**Commit:**
+```rust
+btree.commit_transaction();
+// Updates root_page to modified_root
+// Clears CoW state
+```
+
+**Rollback:**
+```rust
+btree.rollback_transaction();
+// Frees newly allocated pages
+// Clears CoW state
+// Original tree unchanged
+```
+
+<Tip>
+CoW is **space-inefficient** but **time-efficient**: we allocate new pages instead of seeking around the file to update in place. This is ideal for SSDs with fast allocation but slow random writes.
+</Tip>
+
+## Page management
+
+The **Pager** (src/core/pager.rs:145) manages fixed-size 4KB pages:
+
+```rust
+pub struct Pager {
+    file: Arc<Mutex<File>>,          // Database file
+    cache: LRUCache,                 // In-memory page cache
+    num_pages: Arc<RwLock<u64>>,     // Total pages allocated
+    free_list: Arc<RwLock<Vec<PageNum>>>,  // Reusable pages
+}
+```
+
+### Page allocation
+
+**Strategy** (src/core/pager.rs:474):
+
+1. Check free list for reusable pages
+2. If empty, extend file with new page
+3. Return page number
+
+```rust
+pub fn alloc_page(&self) -> Result<PageNum> {
+    // Try free list first
+    let mut free_list = self.free_list.write()?;
+    if let Some(page_num) = free_list.pop() {
+        return Ok(page_num);
+    }
+    drop(free_list);
+    
+    // Allocate new page at end of file
+    let mut num_pages = self.num_pages.write()?;
+    let page_num = *num_pages;
+    *num_pages += 1;
+    
+    Ok(page_num)
+}
+```
+
+**Free list** (src/core/pager.rs:515):
+
+When a page is freed (e.g., during garbage collection):
+
+```rust
+pub fn free_page(&self, page_num: PageNum) -> Result<()> {
+    self.free_list.write()?.push(page_num);
+    self.cache.remove(page_num);  // Evict from cache
+    Ok(())
+}
+```
+
+The free list is persisted in the database header for crash recovery.
+
+### LRU cache
+
+The pager caches pages in memory to avoid disk I/O (src/core/lru_cache.rs):
+
+```rust
+pub struct LRUCache {
+    cache: Arc<RwLock<HashMap<PageNum, CacheEntry>>>,
+    dirty: Arc<RwLock<HashMap<PageNum, bool>>>,
+    capacity: usize,  // Max pages (default 25,000 = ~100MB)
+}
+```
+
+**Read path** (src/core/pager.rs:383):
+
+1. Check cache → **cache hit** (fast)
+2. If miss, read from file → **cache miss** (slow)
+3. Insert into cache, evict LRU page if full
+
+**Write path** (src/core/pager.rs:445):
+
+1. Update cache
+2. Mark page as **dirty**
+3. On flush/commit, write dirty pages to disk
+
+**Metrics:**
+
+```rust
+let metrics = db.metrics();
+println!("Cache hits: {}", metrics.cache_hits);
+println!("Cache misses: {}", metrics.cache_misses);
+println!("Hit rate: {:.2}%", 
+    100.0 * metrics.cache_hits as f64 / (metrics.cache_hits + metrics.cache_misses) as f64
+);
+```
+
+<Warning>
+**Cache sizing tradeoff:**
+- Too small → high cache miss rate, slow queries
+- Too large → memory pressure, swapping
+
+Default 25K pages (~100MB) works well for most workloads. Tune with `DatabaseOptions::cache_size`.
+</Warning>
+
+## Write-ahead log (WAL)
+
+The WAL provides **durability**: committed transactions survive crashes.
+
+### WAL structure
+
+The WAL is an append-only file (src/core/wal.rs:33):
+
+```rust
+pub struct WALFrame {
+    pub tx_id: u64,          // Transaction ID
+    pub page_num: u64,       // Which page
+    pub page_data: Vec<u8>,  // Full 4KB page contents
+    pub checksum: u32,       // CRC32 of (tx_id, page_num, data)
+    pub salt1: u32,          // Replay protection
+    pub salt2: u32,
+}
+```
+
+Frame size: `4KB (page) + 28 bytes (header) = 4124 bytes`
+
+**Checksums** prevent corruption detection:
+
+```rust
+fn calculate_checksum(frame: &WALFrame) -> u32 {
+    let mut buf = vec![];
+    buf.extend_from_slice(&frame.tx_id.to_le_bytes());
+    buf.extend_from_slice(&frame.page_num.to_le_bytes());
+    buf.extend_from_slice(&frame.page_data);
+    
+    let mut crc = crc32_ieee(&buf);
+    crc ^= frame.salt1;
+    crc ^= frame.salt2;
+    
+    crc
+}
+```
+
+**Salt values** prevent replaying stale WAL frames from previous database incarnations.
+
+### Commit protocol
+
+Commit writes to WAL before updating the database (src/core/transaction.rs:616):
+
+```rust
+// 1. Write all modified pages to WAL
+for (page_num, page_data) in writes {
+    wal.write_frame(tx_id, page_num, page_data)?;
+}
+
+// 2. Sync WAL to disk (CRITICAL for durability)
+wal.sync()?;  // fsync()
+
+// 3. Now safe to update database file
+for (page_num, page_data) in writes {
+    pager.write_page_transfer(page_num, page_data)?;
+}
+
+// 4. Sync database file
+pager.sync_data_only()?;
+```
+
+If the process crashes after step 2, the WAL contains a complete record of the commit. On database open, the WAL is **replayed** to recover the transaction.
+
+### Checkpoint
+
+**Checkpointing** merges the WAL into the main database file:
+
+```rust
+pub fn checkpoint(&self, pager: &Pager) -> Result<()> {
+    // 1. Read all WAL frames
+    let frames = self.read_all_frames()?;
+    
+    // 2. Build page map (last write wins)
+    let mut page_map = HashMap::new();
+    for frame in frames {
+        page_map.insert(frame.page_num, frame.page_data);
+    }
+    
+    // 3. Write pages to database (batched for performance)
+    let pages: Vec<(PageNum, Vec<u8>)> = page_map.into_iter().collect();
+    pager.write_pages_direct(pages)?;
+    
+    // 4. Truncate WAL
+    self.file.set_len(WAL_HEADER_SIZE)?;
+    self.frame_num = 0;
+    
+    Ok(())
+}
+```
+
+**Automatic checkpointing** (src/core/database.rs:827):
+
+```rust
+db.set_auto_checkpoint_threshold(1000);
+// Checkpoint when WAL reaches 1000 frames (~4MB)
+```
+
+Checkpoints run in a **background thread** to avoid blocking commits.
+
+<Tip>
+**Checkpoint timing tradeoff:**
+- Frequent → smaller WAL, less recovery time
+- Infrequent → fewer I/O stalls, better write throughput
+
+Default 1000 frames (~4MB) balances both.
+</Tip>
+
+## Crash recovery
+
+On database open (src/core/database.rs:280):
+
+1. Read WAL frame count
+2. If WAL is non-empty:
+   - Read all frames
+   - Validate checksums
+   - Apply to database file (checkpoint)
+   - Truncate WAL
+3. If WAL is corrupted:
+   - Discard incomplete transaction
+   - Database remains consistent
+
+**Recovery guarantees:**
+
+✓ All committed transactions are recovered
+✓ Uncommitted transactions are discarded
+✓ Database is always in a consistent state
+
+## Page layout
+
+### Database header (page 0)
+
+The first page stores global metadata (src/core/pager.rs:15):
+
+```
+Offset  Size   Field
+0       4      Magic ("JSIN")
+4       4      Version (1)
+8       4      Page size (4096)
+12      8      Num pages
+20      4      Free count
+24      8      Metadata page number
+32      8      Next transaction ID
+40      8*N    Free list (page numbers)
+```
+
+**Corruption detection** (src/core/pager.rs:222):
+
+- Validates magic, version, page size on open
+- Checks num_pages ≤ file size
+- Validates metadata_page < num_pages
+- Detects duplicate free list entries
+
+### Document page
+
+Each document occupies one or more pages:
+
+```
+Offset  Size   Field
+0       8      xmin (transaction ID that created this)
+8       8      xmax (transaction ID that deleted this, 0=current)
+16      4      Data length
+20      N      JSON document (BSON-encoded)
+```
+
+Large documents (> 4KB) are split across multiple pages with overflow pointers.
+
+### B-tree node page
+
+**Leaf node:**
+```
+Offset  Size   Field
+0       1      Node type (1 = leaf)
+1       2      Num keys
+3       8      Parent page
+11      8      Next leaf page
+19      2      Num entries
+21      ...    Entries: [key_len(2), key(N), value(8)]*
+```
+
+**Internal node:**
+```
+Offset  Size   Field
+0       1      Node type (0 = internal)
+1       2      Num keys
+3       8      Parent page
+11      2      Num children
+13      ...    Children: [page_num(8)]*
+...     ...    Keys: [key_len(2), key(N)]*
+```
+
+Serialization (src/core/btree.rs:575) and deserialization (src/core/btree.rs:622) enforce 4KB page boundaries.
+
+## Performance optimizations
+
+### Buffer pools
+
+jasonisnthappy reuses buffers for B-tree operations (src/core/database.rs:170):
+
+```rust
+node_serialize_pool: Arc<BufferPool>,  // Pre-allocated 4KB buffers
+page_buffer_pool: Arc<BufferPool>,
+```
+
+This avoids allocating/deallocating millions of 4KB vectors during bulk inserts.
+
+### Batched WAL writes
+
+Consecutive pages are written to WAL in a single syscall (src/core/wal.rs:149):
+
+```rust
+inner.writer.write_all(&data)?;  // Buffered writer
+inner.file_position = offset + data.len();  // Track position
+// No flush until commit
+```
+
+This reduces WAL overhead from ~50μs to ~10μs per frame.
+
+### Batched checkpoint writes
+
+The pager sorts pages and writes consecutive ranges together (src/core/pager.rs:541):
+
+```rust
+pub fn write_pages_direct(&self, pages: Vec<(PageNum, Vec<u8>)>) -> Result<()> {
+    // Sort by page number
+    sorted_pages.sort_unstable_by_key(|(page_num, _)| *page_num);
+    
+    // Find consecutive ranges
+    while batch_end_idx + 1 < sorted_pages.len() {
+        if next_page == curr_page + 1 {
+            batch_end_idx += 1;  // Extend batch
+        } else {
+            break;
+        }
+    }
+    
+    // Write batch in one syscall
+    file.write_all(&batch_buffer)?;
+}
+```
+
+**Impact:** Checkpoint with 5000 pages:
+- Before: 5000 `write()` syscalls
+- After: ~50 batched `write()` syscalls (100x reduction)
+
+### CoW vs in-place update
+
+**Copy-on-write tradeoffs:**
+
+| Aspect | CoW | In-place |
+|--------|-----|----------|
+| Concurrency | ✓ Lock-free reads | ✗ Needs read locks |
+| Write amplification | ✗ High (new pages) | ✓ Low (update in place) |
+| Fragmentation | ✗ Pages scattered | ✓ Pages clustered |
+| Rollback | ✓ Free (drop new pages) | ✗ Complex (undo log) |
+| Crash recovery | ✓ Simple (WAL) | ✗ Complex (WAL + undo) |
+
+jasonisnthappy chooses CoW for **simplicity and concurrency** at the cost of write amplification. Garbage collection and free list reuse mitigate fragmentation.
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+    See how the storage engine fits into the overall system
+  </Card>
+  <Card title="MVCC" icon="layer-group" href="/concepts/mvcc">
+    Understand how CoW enables snapshot isolation
+  </Card>
+</CardGroup>

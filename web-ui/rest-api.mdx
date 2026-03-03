@@ -1,0 +1,596 @@
+---
+title: REST API reference
+description: HTTP endpoints for programmatic database access and management
+---
+
+The web UI exposes a REST API for managing collections, documents, and retrieving metrics. All endpoints return JSON responses.
+
+## Base URL
+
+When the web server is running, all endpoints are available at:
+
+```
+http://127.0.0.1:8080
+```
+
+## Authentication
+
+The current implementation does not include authentication. The API is intended for local development and trusted environments.
+
+<Note>
+For production deployments, use a reverse proxy with authentication (Basic Auth, OAuth, API keys) in front of the web server.
+</Note>
+
+## Health and metrics
+
+### Health check
+
+Check if the server is running.
+
+```http
+GET /health
+```
+
+<ResponseField name="status" type="string">
+  Server status, always returns `"ok"`
+</ResponseField>
+
+**Response**
+
+```json
+{
+  "status": "ok"
+}
+```
+
+### Get metrics
+
+Retrieve current database metrics.
+
+```http
+GET /metrics
+```
+
+<ResponseField name="transactions_begun" type="number">
+  Total number of transactions started
+</ResponseField>
+
+<ResponseField name="transactions_committed" type="number">
+  Total number of transactions committed
+</ResponseField>
+
+<ResponseField name="transactions_aborted" type="number">
+  Total number of transactions aborted
+</ResponseField>
+
+<ResponseField name="active_transactions" type="number">
+  Currently active transactions
+</ResponseField>
+
+<ResponseField name="commit_rate" type="number">
+  Percentage of transactions committed (0.0 to 1.0)
+</ResponseField>
+
+<ResponseField name="transaction_conflicts" type="number">
+  Number of transaction conflicts detected
+</ResponseField>
+
+<ResponseField name="cache_hit_rate" type="number">
+  Cache hit rate percentage (0.0 to 1.0)
+</ResponseField>
+
+<ResponseField name="cache_hits" type="number">
+  Number of cache hits
+</ResponseField>
+
+<ResponseField name="cache_misses" type="number">
+  Number of cache misses
+</ResponseField>
+
+<ResponseField name="dirty_pages" type="number">
+  Current number of dirty pages in cache
+</ResponseField>
+
+<ResponseField name="pages_allocated" type="number">
+  Total pages allocated
+</ResponseField>
+
+<ResponseField name="pages_freed" type="number">
+  Total pages freed
+</ResponseField>
+
+<ResponseField name="wal_writes" type="number">
+  Number of WAL writes
+</ResponseField>
+
+<ResponseField name="wal_bytes_written" type="number">
+  Total bytes written to WAL
+</ResponseField>
+
+<ResponseField name="checkpoints" type="number">
+  Number of checkpoints completed
+</ResponseField>
+
+<ResponseField name="documents_inserted" type="number">
+  Total documents inserted
+</ResponseField>
+
+<ResponseField name="documents_updated" type="number">
+  Total documents updated
+</ResponseField>
+
+<ResponseField name="documents_deleted" type="number">
+  Total documents deleted
+</ResponseField>
+
+<ResponseField name="documents_read" type="number">
+  Total documents read
+</ResponseField>
+
+<ResponseField name="io_errors" type="number">
+  Number of I/O errors encountered
+</ResponseField>
+
+**Response**
+
+```json
+{
+  "transactions_begun": 6,
+  "transactions_committed": 6,
+  "transactions_aborted": 0,
+  "active_transactions": 0,
+  "total_transactions": 6,
+  "commit_rate": 1.0,
+  "batches_committed": 0,
+  "total_batched_txs": 0,
+  "max_batch_size": 0,
+  "avg_batch_size": 0.0,
+  "avg_batch_time_micros": 0.0,
+  "pages_allocated": 12,
+  "pages_freed": 0,
+  "cache_hits": 42,
+  "cache_misses": 18,
+  "cache_total_requests": 60,
+  "cache_hit_rate": 0.7,
+  "dirty_pages": 0,
+  "wal_writes": 6,
+  "wal_bytes_written": 4096,
+  "checkpoints": 0,
+  "documents_inserted": 50,
+  "documents_updated": 5,
+  "documents_deleted": 0,
+  "documents_read": 55,
+  "total_document_operations": 110,
+  "io_errors": 0,
+  "transaction_conflicts": 0
+}
+```
+
+## Collections
+
+### List collections
+
+Retrieve all collection names, sorted alphabetically.
+
+```http
+GET /api/collections
+```
+
+**Response**
+
+```json
+[
+  "blog_posts",
+  "orders",
+  "products",
+  "users"
+]
+```
+
+### Create collection
+
+Create a new collection.
+
+```http
+POST /api/collections
+```
+
+<ParamField body="name" type="string" required>
+  Name of the collection to create. Must contain only letters, numbers, and underscores.
+</ParamField>
+
+**Request**
+
+```json
+{
+  "name": "customers"
+}
+```
+
+<ResponseField name="status" type="string">
+  Always returns `"created"`
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Name of the created collection
+</ResponseField>
+
+**Response** (201 Created)
+
+```json
+{
+  "status": "created",
+  "name": "customers"
+}
+```
+
+### Rename collection
+
+Rename an existing collection.
+
+```http
+PATCH /api/collections/{collection_name}
+```
+
+<ParamField path="collection_name" type="string" required>
+  Current name of the collection
+</ParamField>
+
+<ParamField body="new_name" type="string" required>
+  New name for the collection
+</ParamField>
+
+**Request**
+
+```json
+{
+  "new_name": "premium_customers"
+}
+```
+
+<ResponseField name="status" type="string">
+  Always returns `"renamed"`
+</ResponseField>
+
+<ResponseField name="old_name" type="string">
+  Previous collection name
+</ResponseField>
+
+<ResponseField name="new_name" type="string">
+  New collection name
+</ResponseField>
+
+**Response**
+
+```json
+{
+  "status": "renamed",
+  "old_name": "customers",
+  "new_name": "premium_customers"
+}
+```
+
+### Delete collection
+
+Delete a collection and all its documents.
+
+```http
+DELETE /api/collections/{collection_name}
+```
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection to delete
+</ParamField>
+
+<ResponseField name="status" type="string">
+  Always returns `"deleted"`
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Name of the deleted collection
+</ResponseField>
+
+**Response**
+
+```json
+{
+  "status": "deleted",
+  "name": "customers"
+}
+```
+
+<Note>
+Deleting a collection is permanent and cannot be undone. All documents in the collection will be deleted.
+</Note>
+
+## Documents
+
+### List documents
+
+Retrieve all documents in a collection.
+
+```http
+GET /api/collections/{collection_name}
+```
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+**Response**
+
+```json
+[
+  {
+    "_id": "01JKXM7Z3Q9YHNJ5TC4K8WFP2E",
+    "name": "Alice",
+    "email": "alice@example.com",
+    "age": 30,
+    "role": "admin"
+  },
+  {
+    "_id": "01JKXM7Z3RBKP4M2QW6N7X8Y9Z",
+    "name": "Bob",
+    "email": "bob@example.com",
+    "age": 25,
+    "role": "user"
+  }
+]
+```
+
+### Create document
+
+Insert a new document into a collection.
+
+```http
+POST /api/collections/{collection_name}
+```
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField body="document" type="object" required>
+  JSON document to insert. The `_id` field will be automatically generated if not provided.
+</ParamField>
+
+**Request**
+
+```json
+{
+  "name": "Charlie",
+  "email": "charlie@example.com",
+  "age": 28,
+  "role": "moderator",
+  "preferences": {
+    "theme": "dark",
+    "notifications": true
+  }
+}
+```
+
+<ResponseField name="id" type="string">
+  The generated document ID (ULID format)
+</ResponseField>
+
+**Response** (201 Created)
+
+```json
+{
+  "id": "01JKXM7Z3SCMT5N3RX7P8A9BC1"
+}
+```
+
+### Update document
+
+Update an existing document by ID.
+
+```http
+PUT /api/collections/{collection_name}/{document_id}
+```
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="document_id" type="string" required>
+  Document ID (ULID)
+</ParamField>
+
+<ParamField body="document" type="object" required>
+  Updated document content. The `_id` field cannot be changed.
+</ParamField>
+
+**Request**
+
+```json
+{
+  "_id": "01JKXM7Z3SCMT5N3RX7P8A9BC1",
+  "name": "Charlie Brown",
+  "email": "charlie.brown@example.com",
+  "age": 29,
+  "role": "admin",
+  "preferences": {
+    "theme": "light",
+    "notifications": false
+  }
+}
+```
+
+<ResponseField name="status" type="string">
+  Always returns `"updated"`
+</ResponseField>
+
+**Response**
+
+```json
+{
+  "status": "updated"
+}
+```
+
+<Info>
+Updates replace the entire document. To update specific fields, send the complete document with only the desired fields changed.
+</Info>
+
+### Delete document
+
+Delete a document by ID.
+
+```http
+DELETE /api/collections/{collection_name}/{document_id}
+```
+
+<ParamField path="collection_name" type="string" required>
+  Name of the collection
+</ParamField>
+
+<ParamField path="document_id" type="string" required>
+  Document ID to delete
+</ParamField>
+
+<ResponseField name="status" type="string">
+  Always returns `"deleted"`
+</ResponseField>
+
+**Response**
+
+```json
+{
+  "status": "deleted"
+}
+```
+
+## Error responses
+
+All error responses follow this format:
+
+**404 Not Found**
+
+```
+Not Found
+```
+
+Returned when a collection or document doesn't exist.
+
+**500 Internal Server Error**
+
+```
+Failed to create collection: collection already exists
+```
+
+Returned when an operation fails. The response body contains the error message.
+
+## Example usage
+
+### Using curl
+
+<CodeGroup>
+```bash Get metrics
+curl http://127.0.0.1:8080/metrics
+```
+
+```bash List collections
+curl http://127.0.0.1:8080/api/collections
+```
+
+```bash Create collection
+curl -X POST http://127.0.0.1:8080/api/collections \
+  -H "Content-Type: application/json" \
+  -d '{"name": "products"}'
+```
+
+```bash List documents
+curl http://127.0.0.1:8080/api/collections/users
+```
+
+```bash Create document
+curl -X POST http://127.0.0.1:8080/api/collections/users \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Alice", "email": "alice@example.com", "age": 30}'
+```
+
+```bash Update document
+curl -X PUT http://127.0.0.1:8080/api/collections/users/01JKXM7Z3Q9YHNJ5TC4K8WFP2E \
+  -H "Content-Type: application/json" \
+  -d '{"_id": "01JKXM7Z3Q9YHNJ5TC4K8WFP2E", "name": "Alice Smith", "email": "alice.smith@example.com", "age": 31}'
+```
+
+```bash Delete document
+curl -X DELETE http://127.0.0.1:8080/api/collections/users/01JKXM7Z3Q9YHNJ5TC4K8WFP2E
+```
+</CodeGroup>
+
+### Using JavaScript
+
+```javascript
+// Fetch metrics
+const metrics = await fetch('http://127.0.0.1:8080/metrics')
+  .then(res => res.json());
+
+console.log(`Cache hit rate: ${(metrics.cache_hit_rate * 100).toFixed(1)}%`);
+console.log(`Documents inserted: ${metrics.documents_inserted}`);
+
+// Create a document
+const response = await fetch('http://127.0.0.1:8080/api/collections/users', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    name: 'Bob',
+    email: 'bob@example.com',
+    age: 25
+  })
+});
+
+const result = await response.json();
+console.log(`Created document: ${result.id}`);
+
+// List all documents
+const users = await fetch('http://127.0.0.1:8080/api/collections/users')
+  .then(res => res.json());
+
+console.log(`Found ${users.length} users`);
+```
+
+### Using Python
+
+```python
+import requests
+import json
+
+BASE_URL = 'http://127.0.0.1:8080'
+
+# Get metrics
+metrics = requests.get(f'{BASE_URL}/metrics').json()
+print(f"Active transactions: {metrics['active_transactions']}")
+print(f"Cache hit rate: {metrics['cache_hit_rate'] * 100:.1f}%")
+
+# Create collection
+requests.post(
+    f'{BASE_URL}/api/collections',
+    json={'name': 'products'}
+)
+
+# Insert document
+response = requests.post(
+    f'{BASE_URL}/api/collections/products',
+    json={
+        'name': 'Laptop',
+        'price': 999.99,
+        'in_stock': True
+    }
+)
+doc_id = response.json()['id']
+print(f"Created document: {doc_id}")
+
+# Get all documents
+products = requests.get(f'{BASE_URL}/api/collections/products').json()
+for product in products:
+    print(f"{product['name']}: ${product['price']}")
+```
+
+## Next steps
+
+- [Web UI overview](/web-ui/overview) - Learn about the dashboard interface
+- [Metrics](/monitoring/metrics) - Understanding database metrics
+- [Observability](/monitoring/observability) - Advanced monitoring patterns
